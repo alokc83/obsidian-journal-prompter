@@ -14,13 +14,11 @@ interface ReversePrompterSettings {
 	regex: string;
 }
 
-const DEFAULT_PROMPT = "You are a writing assistant. Your role is to help a user write. \n" + 
-"Infer the type of writing from the user's input and ask insightful and interesting questions to help the user write more. \n" +
-"Your questions should be open-ended and encourage the user to think creatively. \n" +
-"Focus your questions on helping the writer keep moving quickly through and prevent writers block. \n" +
-"The user may provide you with the document file path. \n" +
-"If you see other AI questions, ensure your questions are different. \n" +
-"Write nothing other than one question. "
+const DEFAULT_PROMPT = "You are an expert prompt generator specializing in short writing exercises, particularly 5-minute journaling sessions. Your primary role is to craft compelling, thought-provoking prompts that inspire users to write with depth and creativity. \n\n" +
+"Your prompts should be designed to invoke profound thoughtfulness, deep emotional introspection, challenging philosophical questioning, complex moral ambiguity, and unexpected perspectives. Create prompts that feature unique settings, surprising character flaws, hidden motives, intriguing contradictions, or paradoxical situations that push writers far beyond their comfort zones and encourage them to explore unexpected depths in any subject matter. \n\n" +
+"Feel free to blend wildly different genres, juxtapose contrasting time periods, merge conflicting worldviews, introduce open-ended mysteries, or pose philosophical questions that challenge conventional thinking. Your prompts should be catalysts for creative exploration and personal growth through writing. \n\n" +
+"The user may provide you with a document file path if they want to focus on a specific topic or theme. Use this context to tailor your prompt accordingly, but don't limit yourself to obvious connections - sometimes the most powerful prompts come from unexpected angles. \n\n" +
+"CRITICAL: You must always and always provide exactly one single, well-crafted prompt. Do not provide multiple options, explanations, or variations. Give one powerful, focused prompt that will ignite the writer's imagination and drive them to create something meaningful. "
 
 const DEFAULT_SETTINGS: ReversePrompterSettings = {
 	openAIApiKey: '',
@@ -106,7 +104,7 @@ export default class ReversePrompter extends Plugin {
 		}
 
 		this.inProgress = true;
-		new Notice('Requesting reverse prompt...');
+		new Notice('Generating writing prompt...');
 
 		const openai = new OpenAI({
 			apiKey: this.settings.openAIApiKey,
@@ -169,7 +167,7 @@ export default class ReversePrompter extends Plugin {
 	async onload() {
 		await this.loadSettings();
 
-		this.addRibbonIcon('step-forward', 'Generate reverse prompt', async (evt: MouseEvent) => {
+		this.addRibbonIcon('step-forward', 'Generate writing prompt', async (evt: MouseEvent) => {
 			const view = this.app.workspace.getActiveViewOfType(MarkdownView);
 			if (view) {
 				await this.generateReversePrompt(view, view.editor);
@@ -178,7 +176,7 @@ export default class ReversePrompter extends Plugin {
 
 		this.addCommand({
 			id: 'reverse-prompt',
-			name: 'Generate reverse prompt',
+			name: 'Generate writing prompt',
 			editorCallback: async (editor: Editor, view: MarkdownView) => {
 				await this.generateReversePrompt(view, editor);
 			}
@@ -272,7 +270,7 @@ class ReversePrompterSettingsTab extends PluginSettingTab {
 
 		this.addSetting('prompt')
 			.setName("Prompt")
-			.setDesc("Prompt for the reverse prompt")
+			.setDesc("System prompt for generating writing prompts")
 			.addTextArea(textArea => {
 				textArea.inputEl.id = "reverse-prompter-prompt";
 				textArea.setPlaceholder("Enter the prompt")

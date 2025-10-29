@@ -1,12 +1,12 @@
 # Reverse Prompter
 
-**In Obsidian, AI prompts you.**
+**Generate creative writing prompts with AI.**
 
-Reverse Prompter is an [Obsidian](https://obsidian.md/) plugin that helps you write by generating prompts using AI. 
+Reverse Prompter is an [Obsidian](https://obsidian.md/) plugin that helps you write by generating creative writing prompts using AI. 
 
-If you're stuck and don't know what to write about, this plugin can act as an interested reader and ask questions about your writing.
+Perfect for journaling, creative writing, or any short writing exercises. The plugin generates thoughtful prompts that invoke emotional introspection, philosophical questioning, moral ambiguity, unique settings, character flaws, hidden motives, or contradictions to push you beyond your comfort zone and encourage unexpected depth.
 
-When you click the icon or run the command to generate a reverse prompt, it takes either your selection or the content from your cursor until the last break (header or horizontal line) and sends them to ChatGPT to ask for a writing prompt.
+When you click the icon or run the command to generate a writing prompt, it takes either your selection or the content from your cursor until the last break (header or horizontal line) and sends them to ChatGPT to generate a creative writing prompt.
 
 ## Installation
 
@@ -30,7 +30,7 @@ To use the plugin you will need to get an [OpenAI API Key](https://platform.open
 
 After installing the Reverse Prompter plugin, you can access it through the command palette or the plugin sidebar. 
 
-Simply click on the plugin's icon or the command "Generate reverse prompt".
+Simply click on the plugin's icon or the command "Generate writing prompt".
 
 ## Support
 

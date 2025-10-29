@@ -1,7 +1,7 @@
 {
 	"name": "obsidian-reverse-prompter",
 	"version": "1.0.10",
-	"description": "Generate prompts for you to beat writers block with AI",
+	"description": "Generate creative writing prompts for journaling and short writing with AI",
 	"main": "main.js",
 	"scripts": {
 		"dev": "node esbuild.config.mjs",
