@@ -19,7 +19,7 @@ The plugin generates prompts that invoke emotional introspection, philosophical 
 - **Pricing Display**: See input/output costs per 1M tokens for online models
 - **Latest Models First**: Shows the 2 most recent models by default, with option to view all
 - **Clean Interface**: Simplified settings focused on what matters
-- **Flexible Input**: Works with text selections or all content above cursor
+- **Simple & Direct**: Generates prompts directly - no text selection needed
 
 ## 🚀 Installation
 
@@ -29,7 +29,7 @@ Install from [Obsidian Community Plugins](https://help.obsidian.md/Extending+Obs
 
 ### Manual Installation
 
-1. Download the [latest release](https://github.com/ryanhalliday/obsidian-reverse-prompter/releases)
+1. Download the [latest release](https://github.com/alokc83/obsidian-journal-prompter/releases)
 
 2. Extract the contents to your Obsidian plugins folder:
    - Open Obsidian → Settings → Community Plugins
@@ -73,22 +73,10 @@ For **local providers**, no API keys needed:
 
 **Method 2: Command Palette**
 - Press `Ctrl/Cmd + P`
-- Type "Generate writing prompt"
+- Type "Generate Prompt For Writing"
 - Press Enter
 
-### Text Selection Modes
-
-**With Selection:**
-- Select/highlight text in your note
-- Run the command
-- Only the selected text is sent to AI
-
-**Without Selection:**
-- Place cursor anywhere in your note
-- Run the command
-- All text from the start of the document to the cursor position is sent to AI
-
-The generated prompt will appear at your cursor position (or after the selection).
+The generated prompt will appear at your cursor position.
 
 ## 🎯 Use Cases
 
@@ -157,8 +145,8 @@ See [TESTING_GUIDE.md](./TESTING_GUIDE.md) for comprehensive testing instruction
 ## 🤝 Support
 
 Support the development of this plugin:
-- **Ko-fi**: [ko-fi.com/ryanhalliday](https://ko-fi.com/ryanhalliday)
-- **Issues**: Report bugs or request features on GitHub
+- **Ko-fi**: [ko-fi.com/alokc](https://ko-fi.com/alokc)
+- **Issues**: Report bugs or request features on [GitHub](https://github.com/alokc83/obsidian-journal-prompter/issues)
 
 ## 📄 License
 

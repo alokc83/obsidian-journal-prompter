@@ -703,7 +703,7 @@ export default class ReversePrompter extends Plugin {
 		const pricing = provider.getPricing(modelId);
 		if (!pricing) return false;
 		const totalCost = pricing.input + pricing.output;
-		
+
 		// Consider models cheaper if total cost is less than $2 per 1M tokens
 		return totalCost < 2.0;
 	}
@@ -737,7 +737,7 @@ export default class ReversePrompter extends Plugin {
 		}
 		
 		return this.getAllAvailableModels();
-	}
+		}
 
 	// Fetch models from OpenAI API
 	async fetchModels(): Promise<ModelInfo[] | null> {
@@ -748,7 +748,7 @@ export default class ReversePrompter extends Plugin {
 		const provider = this.getActiveProvider();
 		if (!provider) {
 			return null;
-		}
+	}
 
 		const apiKey = this.getActiveApiKey();
 		if (!apiKey || apiKey.length === 0) {
@@ -824,7 +824,7 @@ export default class ReversePrompter extends Plugin {
 			console.error('Error generating prompt:', error);
 			new Notice(`Failed to generate prompt with ${provider.getName()}.`);
 		} finally {
-			this.inProgress = false;
+		this.inProgress = false;
 		}
 	}
 
@@ -846,7 +846,7 @@ export default class ReversePrompter extends Plugin {
 		for await (const chunk of iterator){
 			editor.replaceSelection(chunk);
 		}
-		
+
 		// Add a newline at the end for clean formatting
 		editor.replaceSelection('\n');
 	}
@@ -1101,7 +1101,7 @@ class ReversePrompterSettingsTab extends PluginSettingTab {
 				
 				// Set current value
 				if (this.plugin.settings.model && models.includes(this.plugin.settings.model)) {
-					dropdown.setValue(this.plugin.settings.model);
+				dropdown.setValue(this.plugin.settings.model);
 				} else if (models.length > 0) {
 					dropdown.setValue(models[0]);
 					this.plugin.settings.model = models[0];
@@ -1136,7 +1136,7 @@ class ReversePrompterSettingsTab extends PluginSettingTab {
 						}
 						
 						button.setDisabled(false);
-					});
+				});
 			});
 
 		this.addSetting('showAllModels')
