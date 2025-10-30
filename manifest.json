@@ -1,11 +1,11 @@
 {
 	"id": "reverse-prompter",
-	"name": "Reverse Prompter",
-	"version": "1.0.10",
+	"name": "Journal Prompter",
+	"version": "1.0.0",
 	"minAppVersion": "1.5.12",
 	"description": "Generate creative writing prompts for journaling and short writing with AI.",
-	"author": "Ryan Halliday",
-	"authorUrl": "https://blog.ryanhalliday.com",
+	"author": "Alok Choudhary",
+	"authorUrl": "https://alokc.netlify.app",
 	"fundingUrl": "https://ko-fi.com/ryanhalliday",
 	"isDesktopOnly": false
 }
