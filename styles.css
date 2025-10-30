@@ -27,3 +27,14 @@ If your plugin does not need CSS, delete this file.
 #reverse-prompter-settings #reverse-prompter-regex { 
 	font-family: monospace;
 }
+
+/* Style for cheaper models in dropdown */
+#reverse-prompter-settings select option[data-cheaper="true"] {
+	color: var(--text-success);
+	font-weight: 500;
+}
+
+/* Style for model dropdown to show pricing info */
+#reverse-prompter-settings .setting-item-control select {
+	min-width: 400px;
+}
