@@ -15,6 +15,42 @@ interface ModelPricing {
 	output: number; // Cost per 1M output tokens
 }
 
+// Duration types for prompt generation
+type PromptDuration = 5 | 10 | 15 | 30;
+
+// Prompt history interfaces (for theme interlinking)
+interface SinglePrompt {
+	id: string;
+	text: string;
+	generatedAt: number;
+	duration: PromptDuration;
+	model: string;
+	provider: string;
+	extractedThemes: string[];
+	keywords: string[];
+}
+
+interface ExtendedSessionPart {
+	partNumber: number;
+	text: string;
+	generatedAt: number;
+}
+
+interface ExtendedSession {
+	sessionId: string;
+	duration: number;
+	parts: ExtendedSessionPart[];
+	generatedAt: number;
+}
+
+interface PromptHistory {
+	singlePrompts: SinglePrompt[];
+	extendedSessions: ExtendedSession[];
+	themeFrequency: {
+		[theme: string]: number;
+	};
+}
+
 // Provider abstraction interface
 interface AIProviderInterface {
 	getName(): string;
@@ -683,6 +719,49 @@ export default class ReversePrompter extends Plugin {
 		this.cacheTimestamp = 0;
 	}
 
+	// Build system prompt with duration-specific guidance
+	buildSystemPrompt(basePrompt: string, duration?: PromptDuration): string {
+		if (!duration) {
+			// Default to 5 minutes if no duration specified
+			duration = 5;
+		}
+
+		let durationGuidance = '';
+		
+		switch (duration) {
+			case 5:
+				durationGuidance = "\n\nDURATION GUIDANCE: This prompt is for a 5-minute writing session. The prompt must be:\n" +
+					"- Simple and straightforward, graspable in less than 30 seconds\n" +
+					"- Focused on a single concept, idea, or scenario\n" +
+					"- Not dense or complex - keep it light and accessible\n" +
+					"- Designed to inspire quick reflection without requiring deep contemplation\n";
+				break;
+			case 10:
+				durationGuidance = "\n\nDURATION GUIDANCE: This prompt is for a 10-minute writing session. The prompt should:\n" +
+					"- Have slightly more depth than a 5-minute prompt\n" +
+					"- Allow for a bit more exploration of a concept\n" +
+					"- Remain accessible and not overwhelming\n" +
+					"- Encourage thoughtful reflection within the time limit\n";
+				break;
+			case 15:
+				durationGuidance = "\n\nDURATION GUIDANCE: This prompt is for a 15-minute writing session. The prompt can:\n" +
+					"- Include more nuanced scenarios with multiple layers\n" +
+					"- Explore concepts with greater complexity\n" +
+					"- Still be manageable within the time limit\n" +
+					"- Invite deeper introspection and exploration\n";
+				break;
+			case 30:
+				durationGuidance = "\n\nDURATION GUIDANCE: This prompt is for a 30-minute writing session. The prompt can:\n" +
+					"- Include detailed and complex scenarios\n" +
+					"- Explore multiple facets of an idea or situation\n" +
+					"- Support deeper, more elaborate writing\n" +
+					"- Allow for rich development and exploration\n";
+				break;
+		}
+
+		return basePrompt + durationGuidance;
+	}
+
 	// Get formatted model name with pricing for display
 	getModelDisplayName(modelId: string): string {
 		const provider = this.getActiveProvider();
@@ -783,7 +862,7 @@ export default class ReversePrompter extends Plugin {
 		}
 	}
 
-	async *requestReversePrompt() {
+	async *requestReversePrompt(duration?: PromptDuration) {
 		if (this.inProgress){
 			new Notice('Another request is in progress');
 			return;
@@ -807,11 +886,15 @@ export default class ReversePrompter extends Plugin {
 		}
 
 		this.inProgress = true;
-		new Notice(`Generating writing prompt with ${provider.getName()}...`);
+		const durationText = duration ? `${duration}-minute ` : '';
+		new Notice(`Generating ${durationText}writing prompt with ${provider.getName()}...`);
 
 		try {
+			// Build system prompt with duration-specific guidance
+			const systemPrompt = this.buildSystemPrompt(this.settings.prompt, duration);
+			
 			const stream = provider.generateStream(
-				this.settings.prompt,
+				systemPrompt,
 				"Generate a creative writing prompt for me.",
 				this.settings.model,
 				apiKey
@@ -828,8 +911,8 @@ export default class ReversePrompter extends Plugin {
 		}
 	}
 
-	async generateReversePrompt(view: MarkdownView, editor: Editor){
-		const iterator = await this.requestReversePrompt();
+	async generateReversePrompt(view: MarkdownView, editor: Editor, duration?: PromptDuration){
+		const iterator = await this.requestReversePrompt(duration);
 		if (!iterator) return;
 
 		const currentLine = editor.getCursor().line;
@@ -854,18 +937,53 @@ export default class ReversePrompter extends Plugin {
 	async onload() {
 		await this.loadSettings();
 
-		this.addRibbonIcon('step-forward', 'Generate Prompt For Writing', async (evt: MouseEvent) => {
+		// Ribbon icon for 5-minute prompt (quick access)
+		this.addRibbonIcon('clock', 'Generate 5-Min Prompt', async (evt: MouseEvent) => {
 			const view = this.app.workspace.getActiveViewOfType(MarkdownView);
 			if (view) {
-				await this.generateReversePrompt(view, view.editor);
+				await this.generateReversePrompt(view, view.editor, 5);
 			}
 		});
 
+		// Default command (uses 5 minutes)
 		this.addCommand({
 			id: 'reverse-prompt',
 			name: 'Generate Prompt For Writing',
 			editorCallback: async (editor: Editor, view: MarkdownView) => {
-				await this.generateReversePrompt(view, editor);
+				await this.generateReversePrompt(view, editor, 5);
+			}
+		});
+
+		// Duration-specific commands
+		this.addCommand({
+			id: 'generate-5min-prompt',
+			name: 'Generate 5-Min Prompt',
+			editorCallback: async (editor: Editor, view: MarkdownView) => {
+				await this.generateReversePrompt(view, editor, 5);
+			}
+		});
+
+		this.addCommand({
+			id: 'generate-10min-prompt',
+			name: 'Generate 10-Min Prompt',
+			editorCallback: async (editor: Editor, view: MarkdownView) => {
+				await this.generateReversePrompt(view, editor, 10);
+			}
+		});
+
+		this.addCommand({
+			id: 'generate-15min-prompt',
+			name: 'Generate 15-Min Prompt',
+			editorCallback: async (editor: Editor, view: MarkdownView) => {
+				await this.generateReversePrompt(view, editor, 15);
+			}
+		});
+
+		this.addCommand({
+			id: 'generate-30min-prompt',
+			name: 'Generate 30-Min Prompt',
+			editorCallback: async (editor: Editor, view: MarkdownView) => {
+				await this.generateReversePrompt(view, editor, 30);
 			}
 		});
 
