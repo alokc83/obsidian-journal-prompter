@@ -1,4 +1,4 @@
-import { App, ButtonComponent, Editor, MarkdownView, Notice, Plugin, PluginSettingTab, Setting, TextAreaComponent } from 'obsidian';
+import { App, ButtonComponent, Editor, MarkdownView, Modal, Notice, Plugin, PluginSettingTab, Setting, TextAreaComponent } from 'obsidian';
 import OpenAI from 'openai';
 import { getFlattenedPricing } from './model-pricing';
 
@@ -695,6 +695,132 @@ const DEFAULT_SETTINGS: ReversePrompterSettings = {
 	showAllModels: false // Default to showing only latest 2 models
 }
 
+// Extended Session Modal for duration and theme selection
+class ExtendedSessionModal extends Modal {
+	duration: number = 30;
+	customDuration: string = '';
+	theme: string = '';
+	onSubmit: (duration: number, theme: string) => void;
+
+	constructor(app: App, onSubmit: (duration: number, theme: string) => void) {
+		super(app);
+		this.onSubmit = onSubmit;
+	}
+
+	onOpen() {
+		const { contentEl } = this;
+		contentEl.empty();
+
+		contentEl.createEl('h2', { text: 'Extended Writing Session' });
+
+		// Duration selection - radio buttons vertically aligned
+		const durationContainer = contentEl.createDiv({ attr: { style: 'margin-bottom: 15px;' } });
+		durationContainer.createEl('label', { text: 'Duration:', attr: { style: 'display: block; margin-bottom: 10px; font-weight: bold;' } });
+		
+		// 30 minutes option
+		const option30 = durationContainer.createDiv({ attr: { style: 'display: flex; align-items: center; margin-bottom: 8px;' } });
+		const duration30 = option30.createEl('input', { type: 'radio', attr: { value: '30', checked: 'checked' } });
+		duration30.setAttribute('name', 'duration');
+		duration30.id = 'duration-30';
+		duration30.addEventListener('change', () => { this.duration = 30; this.customDuration = ''; updateCustomInput(); });
+		const label30 = option30.createEl('label', { text: '30 mins', attr: { style: 'margin-left: 8px; cursor: pointer;' } });
+		label30.setAttribute('for', 'duration-30');
+
+		// 45 minutes option
+		const option45 = durationContainer.createDiv({ attr: { style: 'display: flex; align-items: center; margin-bottom: 8px;' } });
+		const duration45 = option45.createEl('input', { type: 'radio', attr: { value: '45' } });
+		duration45.setAttribute('name', 'duration');
+		duration45.id = 'duration-45';
+		duration45.addEventListener('change', () => { this.duration = 45; this.customDuration = ''; updateCustomInput(); });
+		const label45 = option45.createEl('label', { text: '45 mins', attr: { style: 'margin-left: 8px; cursor: pointer;' } });
+		label45.setAttribute('for', 'duration-45');
+
+		// 60 minutes option
+		const option60 = durationContainer.createDiv({ attr: { style: 'display: flex; align-items: center; margin-bottom: 8px;' } });
+		const duration60 = option60.createEl('input', { type: 'radio', attr: { value: '60' } });
+		duration60.setAttribute('name', 'duration');
+		duration60.id = 'duration-60';
+		duration60.addEventListener('change', () => { this.duration = 60; this.customDuration = ''; updateCustomInput(); });
+		const label60 = option60.createEl('label', { text: '60 mins', attr: { style: 'margin-left: 8px; cursor: pointer;' } });
+		label60.setAttribute('for', 'duration-60');
+
+		// Custom time option
+		const customOptionContainer = durationContainer.createDiv({ attr: { style: 'display: flex; align-items: center; margin-bottom: 10px;' } });
+		const durationCustom = customOptionContainer.createEl('input', { type: 'radio', attr: { value: 'custom' } });
+		durationCustom.setAttribute('name', 'duration');
+		durationCustom.id = 'duration-custom';
+		durationCustom.addEventListener('change', () => { updateCustomInput(); });
+		const labelCustom = customOptionContainer.createEl('label', { text: 'Custom time (in minutes)', attr: { style: 'margin-left: 8px; cursor: pointer;' } });
+		labelCustom.setAttribute('for', 'duration-custom');
+
+		// Custom duration input (initially hidden)
+		const customInputContainer = contentEl.createDiv({ attr: { style: 'margin-bottom: 15px; display: none;' } });
+		customInputContainer.id = 'custom-duration-container';
+		const customInput = customInputContainer.createEl('input', { type: 'number', placeholder: 'Enter minutes', attr: { min: '30', style: 'width: 100%; padding: 8px; box-sizing: border-box;' } });
+		customInput.addEventListener('input', (e) => {
+			this.customDuration = (e.target as HTMLInputElement).value;
+			if (this.customDuration) {
+				this.duration = parseInt(this.customDuration) || 30;
+			}
+		});
+
+		const updateCustomInput = () => {
+			if (durationCustom.checked) {
+				customInputContainer.style.display = 'block';
+				customInput.focus();
+			} else {
+				customInputContainer.style.display = 'none';
+				this.customDuration = '';
+			}
+		};
+
+		// Divider before theme section
+		contentEl.createEl('hr', { attr: { style: 'margin: 15px 0; border: none; border-top: 1px solid var(--background-modifier-border);' } });
+
+		// Theme/genre input (optional)
+		const themeContainer = contentEl.createDiv({ attr: { style: 'margin-bottom: 20px;' } });
+		themeContainer.createEl('label', { text: 'Theme/Genre (optional):', attr: { style: 'display: block; margin-bottom: 8px; font-weight: bold;' } });
+		const themeInput = themeContainer.createEl('input', { type: 'text', placeholder: 'e.g., sci-fi, mystery, personal reflection', attr: { style: 'width: 100%; padding: 8px; box-sizing: border-box;' } });
+		themeInput.addEventListener('input', (e) => {
+			this.theme = (e.target as HTMLInputElement).value;
+		});
+
+		// Divider before buttons
+		contentEl.createEl('hr', { attr: { style: 'margin: 15px 0; border: none; border-top: 1px solid var(--background-modifier-border);' } });
+
+		// Buttons
+		const buttonContainer = contentEl.createDiv({ attr: { style: 'display: flex; gap: 10px; justify-content: flex-end;' } });
+		
+		const cancelButton = buttonContainer.createEl('button', { text: 'Cancel' });
+		cancelButton.addEventListener('click', () => {
+			this.close();
+		});
+
+		const submitButton = buttonContainer.createEl('button', { text: 'Generate Session', attr: { style: 'background: var(--interactive-accent); color: var(--text-on-accent);' } });
+		submitButton.addEventListener('click', () => {
+			const finalDuration = durationCustom.checked && this.customDuration ? parseInt(this.customDuration) : this.duration;
+			if (finalDuration && finalDuration >= 30) {
+				this.onSubmit(finalDuration, this.theme);
+				this.close();
+			} else {
+				new Notice('Please enter a duration of at least 30 minutes.');
+			}
+		});
+
+		// Allow Enter key to submit
+		themeInput.addEventListener('keydown', (e) => {
+			if (e.key === 'Enter') {
+				submitButton.click();
+			}
+		});
+	}
+
+	onClose() {
+		const { contentEl } = this;
+		contentEl.empty();
+	}
+}
+
 export default class ReversePrompter extends Plugin {
 	settings: ReversePrompterSettings;
 
@@ -760,6 +886,175 @@ export default class ReversePrompter extends Plugin {
 		}
 
 		return basePrompt + durationGuidance;
+	}
+
+	// Calculate number of parts for extended session (each part ~10 minutes)
+	// Uses Math.floor to ensure we don't exceed duration: 30 mins = 3 parts, 45 mins = 4 parts, etc.
+	calculateParts(duration: number): number {
+		return Math.floor(duration / 10);
+	}
+
+	// Generate extended writing session with multi-part prompts
+	async generateExtendedSession(view: MarkdownView, editor: Editor, duration: number, theme?: string) {
+		const provider = this.getActiveProvider();
+		if (!provider) {
+			new Notice('Provider not implemented yet.');
+			return;
+		}
+
+		const apiKey = this.getActiveApiKey();
+		if (!apiKey || apiKey.length === 0) {
+			new Notice(`${provider.getName()} API Key is not set`);
+			return;
+		}
+
+		if (!this.settings.model || this.settings.model.length === 0) {
+			new Notice('No model selected');
+			return;
+		}
+
+		if (this.inProgress) {
+			new Notice('Another request is in progress');
+			return;
+		}
+
+		this.inProgress = true;
+		const numParts = this.calculateParts(duration);
+		new Notice(`Generating extended session with ${numParts} parts (${duration} minutes total)...`);
+
+		try {
+			// Build extended session system prompt
+			const extendedPrompt = this.buildExtendedSessionPrompt(this.settings.prompt, duration, numParts, theme);
+
+			// Insert header at cursor
+			const currentLine = editor.getCursor().line;
+			const currentLineContent = editor.getLine(currentLine);
+			if (currentLineContent != "") {
+				editor.setCursor(currentLine, currentLineContent.length);
+				editor.replaceSelection('\n');
+			}
+
+			// Insert header
+			editor.replaceSelection(`# Extended Writing Session - ${duration} minutes\n\n`);
+
+			const parts: string[] = [];
+			let previousPart = '';
+
+			// Generate each part sequentially
+			for (let partNum = 1; partNum <= numParts; partNum++) {
+				new Notice(`Generating part ${partNum} of ${numParts}...`);
+
+				// Build user message for this part
+				let userMessage = `Generate Part ${partNum} of ${numParts} for an extended writing session. `;
+				if (partNum === 1) {
+					userMessage += "This is the first part - set up the scene and introduce the narrative. ";
+					if (theme) {
+						userMessage += `The theme/genre is: ${theme}. `;
+					}
+					userMessage += "First, write a rich narrative context that sets the scene and establishes the scenario. Then provide the writing prompt. Format your response as: [narrative context text] followed by a blank line, then 'Prompt (Part 1):' on its own line, then the actual prompt text. ";
+				} else {
+					userMessage += `This part should build on the previous part. `;
+					if (previousPart) {
+						userMessage += `Previous part summary: ${previousPart.substring(0, 200)}... `;
+					}
+					userMessage += `Continue the narrative naturally, advancing the story. `;
+					userMessage += `Format your response as: [narrative context text that continues the story] followed by a blank line, then 'Prompt (Part ${partNum}):' on its own line, then the actual prompt text. `;
+				}
+				userMessage += "Each part should be designed for approximately 10 minutes of writing. Provide exactly one focused prompt that continues the narrative.";
+
+				// Generate this part
+				const stream = provider.generateStream(
+					extendedPrompt,
+					userMessage,
+					this.settings.model,
+					apiKey
+				);
+
+				let partText = '';
+				for await (const chunk of stream) {
+					partText += chunk;
+				}
+
+				parts.push(partText.trim());
+				previousPart = partText.trim();
+
+				// Format and insert this part
+				if (partNum > 1) {
+					editor.replaceSelection('\n---\n\n');
+				}
+
+				const partTitle = this.getPartTitle(partNum, numParts);
+				// H1 header with bold
+				editor.replaceSelection(`## Part ${partNum}: ${partTitle}\n\n`);
+
+				// Parse the response: separate narrative context from prompt
+				let narrativeContext = '';
+				let promptText = '';
+				
+				const promptMatch = partText.match(/Prompt \(Part \d+\):\s*([\s\S]+)/i);
+				if (promptMatch) {
+					// Response has "Prompt (Part X):" format
+					const promptIndex = partText.indexOf('Prompt (Part');
+					narrativeContext = partText.substring(0, promptIndex).trim();
+					promptText = promptMatch[1].trim();
+				} else {
+					// Fallback: assume all text is the prompt
+					promptText = partText.trim();
+				}
+
+				// Insert narrative context if present (italic)
+				if (narrativeContext) {
+					editor.replaceSelection(`*${narrativeContext}*\n\n`);
+				}
+
+				// Insert prompt label (H3) and prompt text (italic)
+				editor.replaceSelection(`### Prompt (Part ${partNum}):\n\n`);
+				editor.replaceSelection(`*${promptText}*\n\n`);
+
+				// Insert divider and quote starter (cursor positioned after "> ")
+				editor.replaceSelection('----\n> ');
+			}
+
+			// Add final section with divider, tags, and related links
+			editor.replaceSelection('\n----\n\ntags:\nRelated: ');
+
+			new Notice(`Extended session generated successfully!`);
+		} catch (error) {
+			console.error('Error generating extended session:', error);
+			new Notice(`Failed to generate extended session with ${provider.getName()}.`);
+		} finally {
+			this.inProgress = false;
+		}
+	}
+
+	// Build system prompt for extended sessions
+	buildExtendedSessionPrompt(basePrompt: string, duration: number, numParts: number, theme?: string): string {
+		let extendedGuidance = `\n\nEXTENDED SESSION GUIDANCE:\n`;
+		extendedGuidance += `You are generating prompts for an extended writing session of ${duration} minutes, divided into ${numParts} sequential parts.\n\n`;
+		extendedGuidance += `IMPORTANT RULES:\n`;
+		extendedGuidance += `- Each part is designed for approximately 10 minutes of writing\n`;
+		extendedGuidance += `- Parts must be sequential and build a coherent narrative\n`;
+		extendedGuidance += `- Each part should advance the story/scenario naturally\n`;
+		extendedGuidance += `- Maintain continuity between parts\n`;
+		extendedGuidance += `- Create a unified story arc across all parts\n`;
+		if (theme) {
+			extendedGuidance += `- Theme/Genre: ${theme}\n`;
+		}
+		extendedGuidance += `- For each part, first provide rich narrative context that sets the scene or continues the story\n`;
+		extendedGuidance += `- Then provide the writing prompt labeled as "Prompt (Part X):" followed by the actual prompt text\n`;
+		extendedGuidance += `- Format: [narrative context paragraph(s)] followed by blank line, then "Prompt (Part X):" on new line, then the prompt\n`;
+		extendedGuidance += `- Each prompt should inspire 10 minutes of writing\n`;
+
+		return basePrompt + extendedGuidance;
+	}
+
+	// Get part title based on part number and total parts
+	getPartTitle(partNum: number, totalParts: number): string {
+		if (partNum === 1) return 'Introduction/Setup';
+		if (partNum === totalParts) return 'Climax/Resolution';
+		if (partNum === 2 && totalParts > 2) return 'Development';
+		if (partNum === totalParts - 1) return 'Deepening/Tension';
+		return `Part ${partNum} Development`;
 	}
 
 	// Get formatted model name with pricing for display
@@ -984,6 +1279,17 @@ export default class ReversePrompter extends Plugin {
 			name: 'Generate 30-Min Prompt',
 			editorCallback: async (editor: Editor, view: MarkdownView) => {
 				await this.generateReversePrompt(view, editor, 30);
+			}
+		});
+
+		// Extended Writing Session command
+		this.addCommand({
+			id: 'extended-writing-session',
+			name: 'Extended Writing Session',
+			editorCallback: async (editor: Editor, view: MarkdownView) => {
+				new ExtendedSessionModal(this.app, async (duration: number, theme: string) => {
+					await this.generateExtendedSession(view, editor, duration, theme);
+				}).open();
 			}
 		});
 
