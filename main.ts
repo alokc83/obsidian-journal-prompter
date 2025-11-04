@@ -673,6 +673,8 @@ interface ReversePrompterSettings {
 	prompt: string;
 	model: string; // User's selected model (only stored when user saves/selects)
 	showAllModels: boolean; // Whether to show all models or just latest 2
+	promptHistory?: PromptHistory; // Prompt history for theme interlinking (MVP: single prompts only)
+	maxHistoryPrompts: number; // Maximum number of single prompts to keep in history (default: 1000)
 }
 
 const DEFAULT_PROMPT = "You are an expert prompt generator specializing in short writing exercises, particularly 5-minute journaling sessions. Your primary role is to craft compelling, thought-provoking prompts that inspire users to write with depth and creativity. \n\n" +
@@ -692,7 +694,13 @@ const DEFAULT_SETTINGS: ReversePrompterSettings = {
 	},
 	prompt: DEFAULT_PROMPT,
 	model: '', // No default model - will be set when user selects one
-	showAllModels: false // Default to showing only latest 2 models
+	showAllModels: false, // Default to showing only latest 2 models
+	promptHistory: {
+		singlePrompts: [],
+		extendedSessions: [],
+		themeFrequency: {}
+	},
+	maxHistoryPrompts: 1000 // Default to 1000 prompts
 }
 
 // Extended Session Modal for duration and theme selection
@@ -843,6 +851,188 @@ export default class ReversePrompter extends Plugin {
 	clearModelCache(): void {
 		this.cachedModels = null;
 		this.cacheTimestamp = 0;
+	}
+
+	// Initialize prompt history if it doesn't exist
+	ensurePromptHistory(): void {
+		if (!this.settings.promptHistory) {
+			this.settings.promptHistory = {
+				singlePrompts: [],
+				extendedSessions: [],
+				themeFrequency: {}
+			};
+		}
+	}
+
+	// Extract themes from prompt text (simple keyword-based approach)
+	extractThemes(promptText: string): string[] {
+		// Common theme keywords to look for
+		const themeKeywords: { [key: string]: string[] } = {
+			'identity': ['identity', 'self', 'who am i', 'personality', 'character'],
+			'time': ['time', 'memory', 'past', 'future', 'nostalgia', 'moment'],
+			'relationships': ['relationship', 'love', 'friendship', 'family', 'connection', 'bond'],
+			'loss': ['loss', 'grief', 'death', 'absence', 'missing', 'gone'],
+			'change': ['change', 'transformation', 'growth', 'evolution', 'transition'],
+			'fear': ['fear', 'anxiety', 'worry', 'dread', 'uncertainty'],
+			'hope': ['hope', 'dream', 'aspiration', 'wish', 'optimism'],
+			'conflict': ['conflict', 'struggle', 'battle', 'tension', 'opposition'],
+			'discovery': ['discovery', 'realization', 'revelation', 'understanding', 'insight'],
+			'choice': ['choice', 'decision', 'crossroad', 'option', 'path']
+		};
+
+		const foundThemes: string[] = [];
+		const lowerText = promptText.toLowerCase();
+
+		for (const [theme, keywords] of Object.entries(themeKeywords)) {
+			if (keywords.some(keyword => lowerText.includes(keyword))) {
+				foundThemes.push(theme);
+			}
+		}
+
+		return foundThemes;
+	}
+
+	// Extract keywords from prompt text (simple word-based)
+	extractKeywords(promptText: string): string[] {
+		// Remove markdown, punctuation, and common words
+		const words = promptText
+			.toLowerCase()
+			.replace(/[*_#\[\]()]/g, ' ')
+			.replace(/[^\w\s]/g, ' ')
+			.split(/\s+/)
+			.filter(word => word.length > 4) // Words longer than 4 characters
+			.filter(word => !['that', 'this', 'with', 'from', 'have', 'been', 'will', 'would', 'could', 'should', 'about', 'there', 'their', 'write', 'writing', 'prompt', 'journal', 'entry'].includes(word));
+
+		// Get unique keywords, limit to top 10
+		const uniqueWords = [...new Set(words)];
+		return uniqueWords.slice(0, 10);
+	}
+
+	// Update theme frequency map
+	updateThemeFrequency(themes: string[]): void {
+		if (!this.settings.promptHistory) return;
+
+		for (const theme of themes) {
+			if (!this.settings.promptHistory.themeFrequency[theme]) {
+				this.settings.promptHistory.themeFrequency[theme] = 0;
+			}
+			this.settings.promptHistory.themeFrequency[theme]++;
+		}
+	}
+
+	// Enforce history limit (keep last N single prompts based on user setting)
+	enforceHistoryLimit(): void {
+		if (!this.settings.promptHistory) return;
+
+		const maxPrompts = this.settings.maxHistoryPrompts || 1000;
+		if (this.settings.promptHistory.singlePrompts.length > maxPrompts) {
+			// Keep the most recent prompts
+			this.settings.promptHistory.singlePrompts = 
+				this.settings.promptHistory.singlePrompts.slice(-maxPrompts);
+			
+			// Rebuild theme frequency from remaining prompts
+			this.settings.promptHistory.themeFrequency = {};
+			for (const prompt of this.settings.promptHistory.singlePrompts) {
+				this.updateThemeFrequency(prompt.extractedThemes);
+			}
+		}
+	}
+
+	// Save single prompt to history
+	async saveSinglePrompt(promptText: string, duration: PromptDuration): Promise<void> {
+		this.ensurePromptHistory();
+		
+		if (!this.settings.promptHistory) return;
+
+		// Extract themes/keywords from prompt
+		const themes = this.extractThemes(promptText);
+		
+		// Create prompt entry
+		const promptEntry: SinglePrompt = {
+			id: `prompt-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+			text: promptText,
+			generatedAt: Date.now(),
+			duration: duration,
+			model: this.settings.model,
+			provider: this.settings.provider,
+			extractedThemes: themes,
+			keywords: this.extractKeywords(promptText)
+		};
+
+		// Add to history
+		this.settings.promptHistory.singlePrompts.push(promptEntry);
+
+		// Update theme frequency
+		this.updateThemeFrequency(themes);
+
+		// Enforce history limit (keep last 100 prompts)
+		this.enforceHistoryLimit();
+
+		// Save settings
+		await this.saveSettings();
+	}
+
+	// Get top N most frequent themes from prompt history
+	getTopThemes(count: number = 5): string[] {
+		if (!this.settings.promptHistory) return [];
+
+		const themeFrequency = this.settings.promptHistory.themeFrequency;
+		const themes = Object.entries(themeFrequency)
+			.sort((a, b) => b[1] - a[1]) // Sort by frequency (descending)
+			.slice(0, count)
+			.map(([theme]) => theme);
+
+		return themes;
+	}
+
+	// Build theme context for system prompt (single prompts only)
+	buildThemeContext(): string {
+		if (!this.settings.promptHistory || this.settings.promptHistory.singlePrompts.length === 0) {
+			return '';
+		}
+
+		const topThemes = this.getTopThemes(5);
+		
+		if (topThemes.length === 0) {
+			return '';
+		}
+
+		// Build context message
+		let context = '\n\nTHEME INTERLINKING CONTEXT:\n';
+		context += `Based on previous writing prompts you've generated, the following themes have appeared frequently: ${topThemes.join(', ')}.\n\n`;
+		context += `IMPORTANT: When generating this new prompt, you should:\n`;
+		context += `- Relate to these themes in some way (they can inspire or connect to your new prompt)\n`;
+		context += `- Explore these themes from a fresh, new angle (don't repeat previous prompts)\n`;
+		context += `- Create a prompt that naturally connects to what the user has been writing about\n`;
+		context += `- Make the connection subtle and organic - the prompt should feel related but not repetitive\n`;
+		context += `- If these themes don't naturally fit, you can explore new territory, but consider if there's a way to bridge them\n`;
+
+		return context;
+	}
+
+	// Save extended session to history (separate from single prompts)
+	async saveExtendedSession(duration: number, parts: string[]): Promise<void> {
+		this.ensurePromptHistory();
+		
+		if (!this.settings.promptHistory) return;
+
+		// Create session entry with all parts
+		const sessionEntry: ExtendedSession = {
+			sessionId: `session-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+			duration: duration,
+			parts: parts.map((text, index) => ({
+				partNumber: index + 1,
+				text: text.trim(),
+				generatedAt: Date.now() + index // Sequential timestamps
+			})),
+			generatedAt: Date.now()
+		};
+
+		// Add to history (extended sessions stored separately)
+		this.settings.promptHistory.extendedSessions.push(sessionEntry);
+
+		// Save settings (extended sessions don't contribute to theme pool)
+		await this.saveSettings();
 	}
 
 	// Build system prompt with duration-specific guidance
@@ -1018,12 +1208,15 @@ export default class ReversePrompter extends Plugin {
 			// Add final section with divider, tags, and related links
 			editor.replaceSelection('\n----\n\ntags:\nRelated: ');
 
+			// Save extended session to history (separate from single prompts)
+			await this.saveExtendedSession(duration, parts);
+
 			new Notice(`Extended session generated successfully!`);
 		} catch (error) {
 			console.error('Error generating extended session:', error);
 			new Notice(`Failed to generate extended session with ${provider.getName()}.`);
 		} finally {
-			this.inProgress = false;
+		this.inProgress = false;
 		}
 	}
 
@@ -1186,7 +1379,16 @@ export default class ReversePrompter extends Plugin {
 
 		try {
 			// Build system prompt with duration-specific guidance
-			const systemPrompt = this.buildSystemPrompt(this.settings.prompt, duration);
+			let systemPrompt = this.buildSystemPrompt(this.settings.prompt, duration);
+			
+			// Add theme context for single prompts only (not extended sessions)
+			// Extended sessions are independent and don't use theme pool
+			if (duration) {
+				const themeContext = this.buildThemeContext();
+				if (themeContext) {
+					systemPrompt = systemPrompt + themeContext;
+				}
+			}
 			
 			const stream = provider.generateStream(
 				systemPrompt,
@@ -1220,13 +1422,22 @@ export default class ReversePrompter extends Plugin {
 			editor.replaceSelection('\n');
 		}
 
+		// Collect prompt text as we stream it
+		let promptText = '';
+
 		// Stream the response directly at cursor position
 		for await (const chunk of iterator){
 			editor.replaceSelection(chunk);
+			promptText += chunk;
 		}
 
 		// Add a newline at the end for clean formatting
 		editor.replaceSelection('\n');
+
+		// Save single prompt to history (only for single prompts with duration)
+		if (duration) {
+			await this.saveSinglePrompt(promptText.trim(), duration);
+		}
 	}
 
 	async onload() {
@@ -1328,6 +1539,11 @@ export default class ReversePrompter extends Plugin {
 		// Ensure provider is set
 		if (!this.settings.provider) {
 			this.settings.provider = 'openai';
+		}
+
+		// Migration: Set default maxHistoryPrompts if not present
+		if (this.settings.maxHistoryPrompts === undefined) {
+			this.settings.maxHistoryPrompts = 1000;
 		}
 	}
 
@@ -1486,15 +1702,15 @@ class ReversePrompterSettingsTab extends PluginSettingTab {
 			this.addSetting(`${this.plugin.settings.provider}ApiKey`)
 				.setName(label)
 				.setDesc(desc)
-				.addText(text => text
+			.addText(text => text
 					.setPlaceholder(placeholder)
 					.setValue(apiKey)
-					.onChange(async (value) => {
+				.onChange(async (value) => {
 						if (!this.plugin.settings.apiKeys) {
 							this.plugin.settings.apiKeys = {};
 						}
 						this.plugin.settings.apiKeys[this.plugin.settings.provider] = value;
-						await this.plugin.saveSettings();
+					await this.plugin.saveSettings();
 						this.onApiKeyChange(value);
 					}));
 		}
@@ -1592,6 +1808,52 @@ class ReversePrompterSettingsTab extends PluginSettingTab {
 				this.configureResetButton(button, 'prompt', () => {
 					new Notice("Prompt reset to default");
 				});
+			});
+
+		// Prompt History Limit setting
+		this.addSetting('maxHistoryPrompts')
+			.setName("Prompt History Limit")
+			.setDesc("Maximum number of single prompts to keep in history (default: 1000). Higher values may increase plugin load time.")
+			.addText(text => {
+				text.setPlaceholder("1000")
+					.setValue(this.plugin.settings.maxHistoryPrompts?.toString() || "1000")
+					.onChange(async (value) => {
+						const numValue = parseInt(value);
+						if (isNaN(numValue) || numValue < 1) {
+							new Notice("Please enter a valid number greater than 0.");
+							return;
+						}
+
+						// Warning for large values
+						if (numValue > 5000) {
+							const confirmed = confirm(
+								`Warning: Setting history limit to ${numValue} prompts may:\n\n` +
+								`- Increase plugin load time (${Math.round(numValue * 0.5 / 1000)}-${Math.round(numValue * 1.3 / 1000)}MB data)\n` +
+								`- Slow down theme processing\n` +
+								`- Use more disk space\n\n` +
+								`Are you sure you want to continue?`
+							);
+							if (!confirmed) {
+								text.setValue(this.plugin.settings.maxHistoryPrompts?.toString() || "1000");
+								return;
+							}
+						}
+
+						this.plugin.settings.maxHistoryPrompts = numValue;
+						
+						// Enforce new limit immediately
+						this.plugin.enforceHistoryLimit();
+						
+						await this.plugin.saveSettings();
+						
+						if (numValue > 5000) {
+							new Notice(`History limit set to ${numValue}. Plugin performance may be affected.`);
+						} else {
+							new Notice(`History limit updated to ${numValue}.`);
+						}
+					});
+				text.inputEl.type = "number";
+				text.inputEl.min = "1";
 			});
 		
 	}
