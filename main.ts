@@ -1,4 +1,4 @@
-import { App, ButtonComponent, Editor, MarkdownView, Notice, Plugin, PluginSettingTab, Setting, TextAreaComponent } from 'obsidian';
+import { App, ButtonComponent, Editor, MarkdownView, Modal, Notice, Plugin, PluginSettingTab, Setting, TextAreaComponent } from 'obsidian';
 import OpenAI from 'openai';
 import { getFlattenedPricing } from './model-pricing';
 
@@ -13,6 +13,42 @@ interface ModelInfo {
 interface ModelPricing {
 	input: number; // Cost per 1M input tokens
 	output: number; // Cost per 1M output tokens
+}
+
+// Duration types for prompt generation
+type PromptDuration = 5 | 10 | 15 | 30;
+
+// Prompt history interfaces (for theme interlinking)
+interface SinglePrompt {
+	id: string;
+	text: string;
+	generatedAt: number;
+	duration: PromptDuration;
+	model: string;
+	provider: string;
+	extractedThemes: string[];
+	keywords: string[];
+}
+
+interface ExtendedSessionPart {
+	partNumber: number;
+	text: string;
+	generatedAt: number;
+}
+
+interface ExtendedSession {
+	sessionId: string;
+	duration: number;
+	parts: ExtendedSessionPart[];
+	generatedAt: number;
+}
+
+interface PromptHistory {
+	singlePrompts: SinglePrompt[];
+	extendedSessions: ExtendedSession[];
+	themeFrequency: {
+		[theme: string]: number;
+	};
 }
 
 // Provider abstraction interface
@@ -634,15 +670,89 @@ interface ReversePrompterSettings {
 		ollama?: string; // URL for Ollama (e.g., http://localhost:11434)
 		lmstudio?: string; // URL for LM Studio (e.g., http://localhost:1234)
 	};
-	prompt: string;
+	prompt: string; // Legacy field for backward compatibility (maps to prompt30)
+	durationPrompts: {
+		prompt5: string;
+		prompt10: string;
+		prompt15: string;
+		prompt30: string;
+		promptExtended: string; // For extended sessions (45+ minutes)
+	};
 	model: string; // User's selected model (only stored when user saves/selects)
 	showAllModels: boolean; // Whether to show all models or just latest 2
+	promptHistory?: PromptHistory; // Prompt history for theme interlinking (MVP: single prompts only)
+	maxHistoryPrompts: number; // Maximum number of single prompts to keep in history (default: 1000)
 }
 
-const DEFAULT_PROMPT = "You are an expert prompt generator specializing in short writing exercises, particularly 5-minute journaling sessions. Your primary role is to craft compelling, thought-provoking prompts that inspire users to write with depth and creativity. \n\n" +
-"Your prompts should be designed to invoke profound thoughtfulness, deep emotional introspection, challenging philosophical questioning, complex moral ambiguity, and unexpected perspectives. Create prompts that feature unique settings, surprising character flaws, hidden motives, intriguing contradictions, or paradoxical situations that push writers far beyond their comfort zones and encourage them to explore unexpected depths in any subject matter. \n\n" +
-"Feel free to blend wildly different genres, juxtapose contrasting time periods, merge conflicting worldviews, introduce open-ended mysteries, or pose philosophical questions that challenge conventional thinking. Your prompts should be catalysts for creative exploration and personal growth through writing. \n\n" +
-"CRITICAL: You must always and always provide exactly one single, well-crafted prompt. Do not provide multiple options, explanations, or variations. Give one powerful, focused prompt that will ignite the writer's imagination and drive them to create something meaningful. "
+// Default prompts for each duration - focused on journaling, memory, and self-reflection
+// These are used as defaults and can be customized in settings
+const DEFAULT_DURATION_PROMPTS = {
+	prompt5: "You are an expert journaling prompt generator specializing in personal reflection and self-exploration. Your role is to create prompts that help users explore their memories, emotions, and experiences.\n\n" +
+		"For 5-minute journaling sessions, create simple, direct prompts that focus on:\n" +
+		"- Recent experiences or moments from today/this week\n" +
+		"- Current emotions or feelings\n" +
+		"- Simple observations about daily life\n" +
+		"- Quick gratitude or appreciation exercises\n" +
+		"- Immediate sensory experiences or present-moment awareness\n\n" +
+		"Keep prompts personal and introspective, graspable in less than 30 seconds. Focus on helping the writer connect with their own life, not create fictional scenarios. Use language like 'you', 'your life', 'your experience' to keep it personal.\n\n" +
+		"CRITICAL: Provide exactly one single journaling prompt. Do not create fictional scenarios, story premises, or ask them to write about imaginary characters. Focus on their real life, memories, feelings, and self-reflection.",
+	
+	prompt10: "You are an expert journaling prompt generator specializing in personal reflection and self-exploration. Your role is to create prompts that help users explore their memories, emotions, and experiences.\n\n" +
+		"For 10-minute journaling sessions, create prompts that encourage deeper personal exploration:\n" +
+		"- Specific memories from the past (childhood, relationships, significant moments)\n" +
+		"- Processing recent experiences or conversations\n" +
+		"- Exploring patterns in behavior, thoughts, or emotions\n" +
+		"- Reflecting on relationships and connections with others\n" +
+		"- Understanding personal reactions to situations\n" +
+		"- Examining decisions or choices made\n\n" +
+		"Prompts should be accessible yet meaningful, allowing writers to explore their own life experiences with some depth. Keep it personal and grounded in their reality, not fictional scenarios.\n\n" +
+		"CRITICAL: Provide exactly one single journaling prompt. Do not create fictional scenarios or story premises. Focus on helping them reflect on their actual memories, relationships, emotions, and life experiences.",
+	
+	prompt15: "You are an expert journaling prompt generator specializing in personal reflection and self-exploration. Your role is to create prompts that help users explore their memories, emotions, and experiences.\n\n" +
+		"For 15-minute journaling sessions, create prompts that facilitate complex emotional processing:\n" +
+		"- Exploring connections between past experiences and present feelings\n" +
+		"- Understanding recurring patterns in life (relationships, choices, reactions)\n" +
+		"- Processing conflicting emotions or difficult experiences\n" +
+		"- Examining personal growth or changes over time\n" +
+		"- Reflecting on values, beliefs, and what matters most\n" +
+		"- Understanding relationships between different life areas (work, family, self)\n" +
+		"- Exploring fears, hopes, or aspirations rooted in real experience\n\n" +
+		"Create prompts with multiple layers that help writers make connections within their own life story. Guide them through their memories and emotions, not fictional narratives.\n\n" +
+		"CRITICAL: Provide exactly one single journaling prompt. Keep it focused on personal introspection, real memories, and emotional processing. No fictional scenarios, imaginary characters, or story-writing exercises.",
+	
+	prompt30: "You are an expert journaling prompt generator specializing in deep personal reflection and self-exploration. Your role is to create prompts that help users explore their memories, emotions, and life experiences at a profound level.\n\n" +
+		"For 30-minute journaling sessions, create prompts that encourage deep introspection:\n" +
+		"- Exploring life themes and recurring patterns across years\n" +
+		"- Understanding identity, values, and personal philosophy\n" +
+		"- Processing significant life transitions or turning points\n" +
+		"- Examining the relationship between past experiences and present self\n" +
+		"- Reflecting on meaning, purpose, and direction in life\n" +
+		"- Understanding complex emotions and their roots in personal history\n" +
+		"- Exploring relationships, family dynamics, and their impact\n" +
+		"- Processing grief, loss, change, or growth\n" +
+		"- Connecting different life periods to understand personal evolution\n\n" +
+		"Your prompts should invite profound self-examination and emotional honesty. Help writers excavate their memories, understand their patterns, and process their life experiences deeply. Always keep it personal and real—no fictional scenarios.\n\n" +
+		"CRITICAL: Provide exactly one single journaling prompt. Focus on deep personal reflection, real memories, and genuine emotional exploration. Never create fictional story premises or ask them to write about imaginary scenarios.",
+	
+	promptExtended: "You are an expert journaling prompt generator specializing in extended personal reflection and life retrospection (45 minutes and longer). Your role is to create multi-part prompts that guide users through deep exploration of their memories, life experiences, and self-understanding.\n\n" +
+		"For extended journaling sessions, create prompts that:\n" +
+		"- Guide writers through chronological reflection (childhood → present, or present → past)\n" +
+		"- Explore a single theme or relationship across different life periods\n" +
+		"- Process complex emotional experiences with time for depth\n" +
+		"- Examine life patterns, cycles, and recurring themes\n" +
+		"- Connect multiple memories or experiences to understand their meaning\n" +
+		"- Facilitate deep processing of significant life events or transitions\n" +
+		"- Help writers understand how past experiences shape present self\n\n" +
+		"Structure prompts as connected parts that build on each other, maintaining focus on personal retrospection throughout. Each part should:\n" +
+		"- Reference real memories and experiences\n" +
+		"- Encourage emotional honesty and vulnerability\n" +
+		"- Help writers make connections within their own life story\n" +
+		"- Build toward greater self-understanding\n\n" +
+		"CRITICAL: Provide exactly one journaling prompt per part. Never create fictional scenarios, story premises, or ask them to imagine imaginary situations. Keep all prompts focused on their real life, actual memories, genuine emotions, and authentic self-exploration. This is journaling for memory and retrospection, not creative fiction writing."
+};
+
+// Legacy default prompt (for backward compatibility)
+const DEFAULT_PROMPT = DEFAULT_DURATION_PROMPTS.prompt30;
 
 const DEFAULT_SETTINGS: ReversePrompterSettings = {
 	provider: 'openai',
@@ -654,9 +764,148 @@ const DEFAULT_SETTINGS: ReversePrompterSettings = {
 		ollama: 'http://localhost:11434',
 		lmstudio: 'http://localhost:1234'
 	},
-	prompt: DEFAULT_PROMPT,
+	prompt: DEFAULT_PROMPT, // Legacy field for backward compatibility
+	durationPrompts: {
+		prompt5: DEFAULT_DURATION_PROMPTS.prompt5,
+		prompt10: DEFAULT_DURATION_PROMPTS.prompt10,
+		prompt15: DEFAULT_DURATION_PROMPTS.prompt15,
+		prompt30: DEFAULT_DURATION_PROMPTS.prompt30,
+		promptExtended: DEFAULT_DURATION_PROMPTS.promptExtended
+	},
 	model: '', // No default model - will be set when user selects one
-	showAllModels: false // Default to showing only latest 2 models
+	showAllModels: false, // Default to showing only latest 2 models
+	promptHistory: {
+		singlePrompts: [],
+		extendedSessions: [],
+		themeFrequency: {}
+	},
+	maxHistoryPrompts: 1000 // Default to 1000 prompts
+}
+
+// Extended Session Modal for duration and theme selection
+class ExtendedSessionModal extends Modal {
+	duration: number = 30;
+	customDuration: string = '';
+	theme: string = '';
+	onSubmit: (duration: number, theme: string) => void;
+
+	constructor(app: App, onSubmit: (duration: number, theme: string) => void) {
+		super(app);
+		this.onSubmit = onSubmit;
+	}
+
+	onOpen() {
+		const { contentEl } = this;
+		contentEl.empty();
+
+		contentEl.createEl('h2', { text: 'Extended Writing Session' });
+
+		// Duration selection - radio buttons vertically aligned
+		const durationContainer = contentEl.createDiv({ attr: { style: 'margin-bottom: 15px;' } });
+		durationContainer.createEl('label', { text: 'Duration:', attr: { style: 'display: block; margin-bottom: 10px; font-weight: bold;' } });
+		
+		// 30 minutes option
+		const option30 = durationContainer.createDiv({ attr: { style: 'display: flex; align-items: center; margin-bottom: 8px;' } });
+		const duration30 = option30.createEl('input', { type: 'radio', attr: { value: '30', checked: 'checked' } });
+		duration30.setAttribute('name', 'duration');
+		duration30.id = 'duration-30';
+		duration30.addEventListener('change', () => { this.duration = 30; this.customDuration = ''; updateCustomInput(); });
+		const label30 = option30.createEl('label', { text: '30 mins', attr: { style: 'margin-left: 8px; cursor: pointer;' } });
+		label30.setAttribute('for', 'duration-30');
+
+		// 45 minutes option
+		const option45 = durationContainer.createDiv({ attr: { style: 'display: flex; align-items: center; margin-bottom: 8px;' } });
+		const duration45 = option45.createEl('input', { type: 'radio', attr: { value: '45' } });
+		duration45.setAttribute('name', 'duration');
+		duration45.id = 'duration-45';
+		duration45.addEventListener('change', () => { this.duration = 45; this.customDuration = ''; updateCustomInput(); });
+		const label45 = option45.createEl('label', { text: '45 mins', attr: { style: 'margin-left: 8px; cursor: pointer;' } });
+		label45.setAttribute('for', 'duration-45');
+
+		// 60 minutes option
+		const option60 = durationContainer.createDiv({ attr: { style: 'display: flex; align-items: center; margin-bottom: 8px;' } });
+		const duration60 = option60.createEl('input', { type: 'radio', attr: { value: '60' } });
+		duration60.setAttribute('name', 'duration');
+		duration60.id = 'duration-60';
+		duration60.addEventListener('change', () => { this.duration = 60; this.customDuration = ''; updateCustomInput(); });
+		const label60 = option60.createEl('label', { text: '60 mins', attr: { style: 'margin-left: 8px; cursor: pointer;' } });
+		label60.setAttribute('for', 'duration-60');
+
+		// Custom time option
+		const customOptionContainer = durationContainer.createDiv({ attr: { style: 'display: flex; align-items: center; margin-bottom: 10px;' } });
+		const durationCustom = customOptionContainer.createEl('input', { type: 'radio', attr: { value: 'custom' } });
+		durationCustom.setAttribute('name', 'duration');
+		durationCustom.id = 'duration-custom';
+		durationCustom.addEventListener('change', () => { updateCustomInput(); });
+		const labelCustom = customOptionContainer.createEl('label', { text: 'Custom time (in minutes)', attr: { style: 'margin-left: 8px; cursor: pointer;' } });
+		labelCustom.setAttribute('for', 'duration-custom');
+
+		// Custom duration input (initially hidden)
+		const customInputContainer = contentEl.createDiv({ attr: { style: 'margin-bottom: 15px; display: none;' } });
+		customInputContainer.id = 'custom-duration-container';
+		const customInput = customInputContainer.createEl('input', { type: 'number', placeholder: 'Enter minutes', attr: { min: '30', style: 'width: 100%; padding: 8px; box-sizing: border-box;' } });
+		customInput.addEventListener('input', (e) => {
+			this.customDuration = (e.target as HTMLInputElement).value;
+			if (this.customDuration) {
+				this.duration = parseInt(this.customDuration) || 30;
+			}
+		});
+
+		const updateCustomInput = () => {
+			if (durationCustom.checked) {
+				customInputContainer.style.display = 'block';
+				customInput.focus();
+			} else {
+				customInputContainer.style.display = 'none';
+				this.customDuration = '';
+			}
+		};
+
+		// Divider before theme section
+		contentEl.createEl('hr', { attr: { style: 'margin: 15px 0; border: none; border-top: 1px solid var(--background-modifier-border);' } });
+
+		// Theme/genre input (optional)
+		const themeContainer = contentEl.createDiv({ attr: { style: 'margin-bottom: 20px;' } });
+		themeContainer.createEl('label', { text: 'Theme/Genre (optional):', attr: { style: 'display: block; margin-bottom: 8px; font-weight: bold;' } });
+		const themeInput = themeContainer.createEl('input', { type: 'text', placeholder: 'e.g., sci-fi, mystery, personal reflection', attr: { style: 'width: 100%; padding: 8px; box-sizing: border-box;' } });
+		themeInput.addEventListener('input', (e) => {
+			this.theme = (e.target as HTMLInputElement).value;
+		});
+
+		// Divider before buttons
+		contentEl.createEl('hr', { attr: { style: 'margin: 15px 0; border: none; border-top: 1px solid var(--background-modifier-border);' } });
+
+		// Buttons
+		const buttonContainer = contentEl.createDiv({ attr: { style: 'display: flex; gap: 10px; justify-content: flex-end;' } });
+		
+		const cancelButton = buttonContainer.createEl('button', { text: 'Cancel' });
+		cancelButton.addEventListener('click', () => {
+			this.close();
+		});
+
+		const submitButton = buttonContainer.createEl('button', { text: 'Generate Session', attr: { style: 'background: var(--interactive-accent); color: var(--text-on-accent);' } });
+		submitButton.addEventListener('click', () => {
+			const finalDuration = durationCustom.checked && this.customDuration ? parseInt(this.customDuration) : this.duration;
+			if (finalDuration && finalDuration >= 30) {
+				this.onSubmit(finalDuration, this.theme);
+				this.close();
+			} else {
+				new Notice('Please enter a duration of at least 30 minutes.');
+			}
+		});
+
+		// Allow Enter key to submit
+		themeInput.addEventListener('keydown', (e) => {
+			if (e.key === 'Enter') {
+				submitButton.click();
+			}
+		});
+	}
+
+	onClose() {
+		const { contentEl } = this;
+		contentEl.empty();
+	}
 }
 
 export default class ReversePrompter extends Plugin {
@@ -683,6 +932,397 @@ export default class ReversePrompter extends Plugin {
 		this.cacheTimestamp = 0;
 	}
 
+	// Initialize prompt history if it doesn't exist
+	ensurePromptHistory(): void {
+		if (!this.settings.promptHistory) {
+			this.settings.promptHistory = {
+				singlePrompts: [],
+				extendedSessions: [],
+				themeFrequency: {}
+			};
+		}
+	}
+
+	// Extract themes from prompt text (simple keyword-based approach)
+	extractThemes(promptText: string): string[] {
+		// Common theme keywords to look for
+		const themeKeywords: { [key: string]: string[] } = {
+			'identity': ['identity', 'self', 'who am i', 'personality', 'character'],
+			'time': ['time', 'memory', 'past', 'future', 'nostalgia', 'moment'],
+			'relationships': ['relationship', 'love', 'friendship', 'family', 'connection', 'bond'],
+			'loss': ['loss', 'grief', 'death', 'absence', 'missing', 'gone'],
+			'change': ['change', 'transformation', 'growth', 'evolution', 'transition'],
+			'fear': ['fear', 'anxiety', 'worry', 'dread', 'uncertainty'],
+			'hope': ['hope', 'dream', 'aspiration', 'wish', 'optimism'],
+			'conflict': ['conflict', 'struggle', 'battle', 'tension', 'opposition'],
+			'discovery': ['discovery', 'realization', 'revelation', 'understanding', 'insight'],
+			'choice': ['choice', 'decision', 'crossroad', 'option', 'path']
+		};
+
+		const foundThemes: string[] = [];
+		const lowerText = promptText.toLowerCase();
+
+		for (const [theme, keywords] of Object.entries(themeKeywords)) {
+			if (keywords.some(keyword => lowerText.includes(keyword))) {
+				foundThemes.push(theme);
+			}
+		}
+
+		return foundThemes;
+	}
+
+	// Extract keywords from prompt text (simple word-based)
+	extractKeywords(promptText: string): string[] {
+		// Remove markdown, punctuation, and common words
+		const words = promptText
+			.toLowerCase()
+			.replace(/[*_#\[\]()]/g, ' ')
+			.replace(/[^\w\s]/g, ' ')
+			.split(/\s+/)
+			.filter(word => word.length > 4) // Words longer than 4 characters
+			.filter(word => !['that', 'this', 'with', 'from', 'have', 'been', 'will', 'would', 'could', 'should', 'about', 'there', 'their', 'write', 'writing', 'prompt', 'journal', 'entry'].includes(word));
+
+		// Get unique keywords, limit to top 10
+		const uniqueWords = [...new Set(words)];
+		return uniqueWords.slice(0, 10);
+	}
+
+	// Update theme frequency map
+	updateThemeFrequency(themes: string[]): void {
+		if (!this.settings.promptHistory) return;
+
+		for (const theme of themes) {
+			if (!this.settings.promptHistory.themeFrequency[theme]) {
+				this.settings.promptHistory.themeFrequency[theme] = 0;
+			}
+			this.settings.promptHistory.themeFrequency[theme]++;
+		}
+	}
+
+	// Enforce history limit (keep last N single prompts based on user setting)
+	enforceHistoryLimit(): void {
+		if (!this.settings.promptHistory) return;
+
+		const maxPrompts = this.settings.maxHistoryPrompts || 1000;
+		if (this.settings.promptHistory.singlePrompts.length > maxPrompts) {
+			// Keep the most recent prompts
+			this.settings.promptHistory.singlePrompts = 
+				this.settings.promptHistory.singlePrompts.slice(-maxPrompts);
+			
+			// Rebuild theme frequency from remaining prompts
+			this.settings.promptHistory.themeFrequency = {};
+			for (const prompt of this.settings.promptHistory.singlePrompts) {
+				this.updateThemeFrequency(prompt.extractedThemes);
+			}
+		}
+	}
+
+	// Save single prompt to history
+	async saveSinglePrompt(promptText: string, duration: PromptDuration): Promise<void> {
+		this.ensurePromptHistory();
+		
+		if (!this.settings.promptHistory) return;
+
+		// Extract themes/keywords from prompt
+		const themes = this.extractThemes(promptText);
+		
+		// Create prompt entry
+		const promptEntry: SinglePrompt = {
+			id: `prompt-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+			text: promptText,
+			generatedAt: Date.now(),
+			duration: duration,
+			model: this.settings.model,
+			provider: this.settings.provider,
+			extractedThemes: themes,
+			keywords: this.extractKeywords(promptText)
+		};
+
+		// Add to history
+		this.settings.promptHistory.singlePrompts.push(promptEntry);
+
+		// Update theme frequency
+		this.updateThemeFrequency(themes);
+
+		// Enforce history limit (keep last 100 prompts)
+		this.enforceHistoryLimit();
+
+		// Save settings
+		await this.saveSettings();
+	}
+
+	// Get top N most frequent themes from prompt history
+	getTopThemes(count: number = 5): string[] {
+		if (!this.settings.promptHistory) return [];
+
+		const themeFrequency = this.settings.promptHistory.themeFrequency;
+		const themes = Object.entries(themeFrequency)
+			.sort((a, b) => b[1] - a[1]) // Sort by frequency (descending)
+			.slice(0, count)
+			.map(([theme]) => theme);
+
+		return themes;
+	}
+
+	// Build theme context for system prompt (single prompts only)
+	buildThemeContext(): string {
+		if (!this.settings.promptHistory || this.settings.promptHistory.singlePrompts.length === 0) {
+			return '';
+		}
+
+		const topThemes = this.getTopThemes(5);
+		
+		if (topThemes.length === 0) {
+			return '';
+		}
+
+		// Build context message
+		let context = '\n\nTHEME INTERLINKING CONTEXT:\n';
+		context += `Based on previous writing prompts you've generated, the following themes have appeared frequently: ${topThemes.join(', ')}.\n\n`;
+		context += `IMPORTANT: When generating this new prompt, you should:\n`;
+		context += `- Relate to these themes in some way (they can inspire or connect to your new prompt)\n`;
+		context += `- Explore these themes from a fresh, new angle (don't repeat previous prompts)\n`;
+		context += `- Create a prompt that naturally connects to what the user has been writing about\n`;
+		context += `- Make the connection subtle and organic - the prompt should feel related but not repetitive\n`;
+		context += `- If these themes don't naturally fit, you can explore new territory, but consider if there's a way to bridge them\n`;
+
+		return context;
+	}
+
+	// Save extended session to history (separate from single prompts)
+	async saveExtendedSession(duration: number, parts: string[]): Promise<void> {
+		this.ensurePromptHistory();
+		
+		if (!this.settings.promptHistory) return;
+
+		// Create session entry with all parts
+		const sessionEntry: ExtendedSession = {
+			sessionId: `session-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+			duration: duration,
+			parts: parts.map((text, index) => ({
+				partNumber: index + 1,
+				text: text.trim(),
+				generatedAt: Date.now() + index // Sequential timestamps
+			})),
+			generatedAt: Date.now()
+		};
+
+		// Add to history (extended sessions stored separately)
+		this.settings.promptHistory.extendedSessions.push(sessionEntry);
+
+		// Save settings (extended sessions don't contribute to theme pool)
+		await this.saveSettings();
+	}
+
+	// Build system prompt with duration-specific guidance
+	buildSystemPrompt(basePrompt: string, duration?: PromptDuration): string {
+		if (!duration) {
+			// Default to 5 minutes if no duration specified
+			duration = 5;
+		}
+
+		// Use duration-specific prompt from settings
+		let durationPrompt: string;
+		switch (duration) {
+			case 5:
+				durationPrompt = this.settings.durationPrompts?.prompt5 || DEFAULT_DURATION_PROMPTS.prompt5;
+				break;
+			case 10:
+				durationPrompt = this.settings.durationPrompts?.prompt10 || DEFAULT_DURATION_PROMPTS.prompt10;
+				break;
+			case 15:
+				durationPrompt = this.settings.durationPrompts?.prompt15 || DEFAULT_DURATION_PROMPTS.prompt15;
+				break;
+			case 30:
+				durationPrompt = this.settings.durationPrompts?.prompt30 || DEFAULT_DURATION_PROMPTS.prompt30;
+				break;
+			default:
+				durationPrompt = this.settings.durationPrompts?.prompt5 || DEFAULT_DURATION_PROMPTS.prompt5;
+		}
+		
+		// The basePrompt parameter is kept for backward compatibility and extended sessions
+		return durationPrompt;
+	}
+
+	// Calculate number of parts for extended session (each part ~10 minutes)
+	// Uses Math.floor to ensure we don't exceed duration: 30 mins = 3 parts, 45 mins = 4 parts, etc.
+	calculateParts(duration: number): number {
+		return Math.floor(duration / 10);
+	}
+
+	// Generate extended writing session with multi-part prompts
+	async generateExtendedSession(view: MarkdownView, editor: Editor, duration: number, theme?: string) {
+		const provider = this.getActiveProvider();
+		if (!provider) {
+			new Notice('Provider not implemented yet.');
+			return;
+		}
+
+		const apiKey = this.getActiveApiKey();
+		if (!apiKey || apiKey.length === 0) {
+			new Notice(`${provider.getName()} API Key is not set`);
+			return;
+		}
+
+		if (!this.settings.model || this.settings.model.length === 0) {
+			new Notice('No model selected');
+			return;
+		}
+
+		if (this.inProgress) {
+			new Notice('Another request is in progress');
+			return;
+		}
+
+		this.inProgress = true;
+		const numParts = this.calculateParts(duration);
+		new Notice(`Generating extended session with ${numParts} parts (${duration} minutes total)...`);
+
+		try {
+			// Build extended session system prompt
+			const extendedPrompt = this.buildExtendedSessionPrompt(this.settings.prompt, duration, numParts, theme);
+
+			// Insert header at cursor
+			const currentLine = editor.getCursor().line;
+			const currentLineContent = editor.getLine(currentLine);
+			if (currentLineContent != "") {
+				editor.setCursor(currentLine, currentLineContent.length);
+				editor.replaceSelection('\n');
+			}
+
+			// Insert header
+			editor.replaceSelection(`# Extended Writing Session - ${duration} minutes\n\n`);
+
+			const parts: string[] = [];
+			let previousPart = '';
+
+			// Generate each part sequentially
+			for (let partNum = 1; partNum <= numParts; partNum++) {
+				new Notice(`Generating part ${partNum} of ${numParts}...`);
+
+				// Build user message for this part
+				let userMessage = `Generate Part ${partNum} of ${numParts} for an extended writing session. `;
+				if (partNum === 1) {
+					userMessage += "This is the first part - set up the scene and introduce the narrative. ";
+					if (theme) {
+						userMessage += `The theme/genre is: ${theme}. `;
+					}
+					userMessage += "First, write a rich narrative context that sets the scene and establishes the scenario. Then provide the writing prompt. Format your response as: [narrative context text] followed by a blank line, then 'Prompt (Part 1):' on its own line, then the actual prompt text. ";
+				} else {
+					userMessage += `This part should build on the previous part. `;
+					if (previousPart) {
+						userMessage += `Previous part summary: ${previousPart.substring(0, 200)}... `;
+					}
+					userMessage += `Continue the narrative naturally, advancing the story. `;
+					userMessage += `Format your response as: [narrative context text that continues the story] followed by a blank line, then 'Prompt (Part ${partNum}):' on its own line, then the actual prompt text. `;
+				}
+				userMessage += "Each part should be designed for approximately 10 minutes of writing. Provide exactly one focused prompt that continues the narrative.";
+
+				// Generate this part
+				const stream = provider.generateStream(
+					extendedPrompt,
+					userMessage,
+					this.settings.model,
+					apiKey
+				);
+
+				let partText = '';
+				for await (const chunk of stream) {
+					partText += chunk;
+				}
+
+				parts.push(partText.trim());
+				previousPart = partText.trim();
+
+				// Format and insert this part
+				if (partNum > 1) {
+					editor.replaceSelection('\n---\n\n');
+				}
+
+				const partTitle = this.getPartTitle(partNum, numParts);
+				// H1 header with bold
+				editor.replaceSelection(`## Part ${partNum}: ${partTitle}\n\n`);
+
+				// Parse the response: separate narrative context from prompt
+				let narrativeContext = '';
+				let promptText = '';
+				
+				const promptMatch = partText.match(/Prompt \(Part \d+\):\s*([\s\S]+)/i);
+				if (promptMatch) {
+					// Response has "Prompt (Part X):" format
+					const promptIndex = partText.indexOf('Prompt (Part');
+					narrativeContext = partText.substring(0, promptIndex).trim();
+					promptText = promptMatch[1].trim();
+				} else {
+					// Fallback: assume all text is the prompt
+					promptText = partText.trim();
+				}
+
+				// Insert narrative context if present (italic)
+				if (narrativeContext) {
+					editor.replaceSelection(`*${narrativeContext}*\n\n`);
+				}
+
+				// Insert prompt label (H3) and prompt text (italic)
+				editor.replaceSelection(`### Prompt (Part ${partNum}):\n\n`);
+				editor.replaceSelection(`*${promptText}*\n\n`);
+
+				// Insert divider and quote starter (cursor positioned after "> ")
+				editor.replaceSelection('----\n> ');
+			}
+
+			// Add final section with divider, tags, and related links
+			editor.replaceSelection('\n----\n\ntags:\nRelated: ');
+
+			// Save extended session to history (separate from single prompts)
+			await this.saveExtendedSession(duration, parts);
+
+			new Notice(`Extended session generated successfully!`);
+		} catch (error) {
+			console.error('Error generating extended session:', error);
+			new Notice(`Failed to generate extended session with ${provider.getName()}.`);
+		} finally {
+		this.inProgress = false;
+		}
+	}
+
+	// Build system prompt for extended sessions
+	// Extended sessions use the extended session prompt as foundation, enhanced with multi-part narrative guidance
+	buildExtendedSessionPrompt(basePrompt: string, duration: number, numParts: number, theme?: string): string {
+		// Use extended session prompt from settings (designed for 45+ minute sessions)
+		const extendedBasePrompt = this.settings.durationPrompts?.promptExtended || DEFAULT_DURATION_PROMPTS.promptExtended;
+		
+		let extendedGuidance = `\n\nEXTENDED SESSION GUIDANCE:\n`;
+		extendedGuidance += `You are generating prompts for an extended writing session of ${duration} minutes, divided into ${numParts} sequential parts.\n\n`;
+		extendedGuidance += `IMPORTANT RULES FOR MULTI-PART NARRATIVE PROMPTS:\n`;
+		extendedGuidance += `- Each part is designed for approximately 10 minutes of writing\n`;
+		extendedGuidance += `- Parts must be sequential and build a coherent narrative arc\n`;
+		extendedGuidance += `- Each part should advance the story/scenario naturally from the previous part\n`;
+		extendedGuidance += `- Maintain continuity between parts - reference previous events, characters, or themes\n`;
+		extendedGuidance += `- Create a unified story arc across all parts with natural progression\n`;
+		extendedGuidance += `- Build tension, depth, and complexity as the narrative progresses\n`;
+		if (theme) {
+			extendedGuidance += `- Theme/Genre: ${theme}\n`;
+		}
+		extendedGuidance += `\nOUTPUT FORMAT FOR EACH PART:\n`;
+		extendedGuidance += `- First, provide rich narrative context (in italics) that sets the scene or continues the story from the previous part\n`;
+		extendedGuidance += `- Then, on a new line, provide the writing prompt labeled as "Prompt (Part X):" followed by the actual prompt text (also in italics)\n`;
+		extendedGuidance += `- The narrative context should bridge from previous parts and set up the current prompt\n`;
+		extendedGuidance += `- Each prompt should inspire approximately 10 minutes of focused writing\n`;
+		extendedGuidance += `- Make the narrative context engaging and immersive, drawing the writer into the evolving story\n`;
+
+		return extendedBasePrompt + extendedGuidance;
+	}
+
+	// Get part title based on part number and total parts
+	getPartTitle(partNum: number, totalParts: number): string {
+		if (partNum === 1) return 'Introduction/Setup';
+		if (partNum === totalParts) return 'Climax/Resolution';
+		if (partNum === 2 && totalParts > 2) return 'Development';
+		if (partNum === totalParts - 1) return 'Deepening/Tension';
+		return `Part ${partNum} Development`;
+	}
+
 	// Get formatted model name with pricing for display
 	getModelDisplayName(modelId: string): string {
 		const provider = this.getActiveProvider();
@@ -703,7 +1343,7 @@ export default class ReversePrompter extends Plugin {
 		const pricing = provider.getPricing(modelId);
 		if (!pricing) return false;
 		const totalCost = pricing.input + pricing.output;
-		
+
 		// Consider models cheaper if total cost is less than $2 per 1M tokens
 		return totalCost < 2.0;
 	}
@@ -737,7 +1377,7 @@ export default class ReversePrompter extends Plugin {
 		}
 		
 		return this.getAllAvailableModels();
-	}
+		}
 
 	// Fetch models from OpenAI API
 	async fetchModels(): Promise<ModelInfo[] | null> {
@@ -748,7 +1388,7 @@ export default class ReversePrompter extends Plugin {
 		const provider = this.getActiveProvider();
 		if (!provider) {
 			return null;
-		}
+	}
 
 		const apiKey = this.getActiveApiKey();
 		if (!apiKey || apiKey.length === 0) {
@@ -783,7 +1423,7 @@ export default class ReversePrompter extends Plugin {
 		}
 	}
 
-	async *requestReversePrompt() {
+	async *requestReversePrompt(duration?: PromptDuration) {
 		if (this.inProgress){
 			new Notice('Another request is in progress');
 			return;
@@ -807,11 +1447,24 @@ export default class ReversePrompter extends Plugin {
 		}
 
 		this.inProgress = true;
-		new Notice(`Generating writing prompt with ${provider.getName()}...`);
+		const durationText = duration ? `${duration}-minute ` : '';
+		new Notice(`Generating ${durationText}writing prompt with ${provider.getName()}...`);
 
 		try {
+			// Build system prompt with duration-specific guidance
+			let systemPrompt = this.buildSystemPrompt(this.settings.prompt, duration);
+			
+			// Add theme context for single prompts only (not extended sessions)
+			// Extended sessions are independent and don't use theme pool
+			if (duration) {
+				const themeContext = this.buildThemeContext();
+				if (themeContext) {
+					systemPrompt = systemPrompt + themeContext;
+				}
+			}
+			
 			const stream = provider.generateStream(
-				this.settings.prompt,
+				systemPrompt,
 				"Generate a creative writing prompt for me.",
 				this.settings.model,
 				apiKey
@@ -824,12 +1477,12 @@ export default class ReversePrompter extends Plugin {
 			console.error('Error generating prompt:', error);
 			new Notice(`Failed to generate prompt with ${provider.getName()}.`);
 		} finally {
-			this.inProgress = false;
+		this.inProgress = false;
 		}
 	}
 
-	async generateReversePrompt(view: MarkdownView, editor: Editor){
-		const iterator = await this.requestReversePrompt();
+	async generateReversePrompt(view: MarkdownView, editor: Editor, duration?: PromptDuration){
+		const iterator = await this.requestReversePrompt(duration);
 		if (!iterator) return;
 
 		const currentLine = editor.getCursor().line;
@@ -842,30 +1495,85 @@ export default class ReversePrompter extends Plugin {
 			editor.replaceSelection('\n');
 		}
 
+		// Collect prompt text as we stream it
+		let promptText = '';
+
 		// Stream the response directly at cursor position
 		for await (const chunk of iterator){
 			editor.replaceSelection(chunk);
+			promptText += chunk;
 		}
-		
+
 		// Add a newline at the end for clean formatting
 		editor.replaceSelection('\n');
+
+		// Save single prompt to history (only for single prompts with duration)
+		if (duration) {
+			await this.saveSinglePrompt(promptText.trim(), duration);
+		}
 	}
 
 	async onload() {
 		await this.loadSettings();
 
-		this.addRibbonIcon('step-forward', 'Generate Prompt For Writing', async (evt: MouseEvent) => {
+		// Ribbon icon for 5-minute prompt (quick access)
+		this.addRibbonIcon('clock', 'Generate 5-Min Prompt', async (evt: MouseEvent) => {
 			const view = this.app.workspace.getActiveViewOfType(MarkdownView);
 			if (view) {
-				await this.generateReversePrompt(view, view.editor);
+				await this.generateReversePrompt(view, view.editor, 5);
 			}
 		});
 
+		// Default command (uses 5 minutes)
 		this.addCommand({
 			id: 'reverse-prompt',
 			name: 'Generate Prompt For Writing',
 			editorCallback: async (editor: Editor, view: MarkdownView) => {
-				await this.generateReversePrompt(view, editor);
+				await this.generateReversePrompt(view, editor, 5);
+			}
+		});
+
+		// Duration-specific commands
+		this.addCommand({
+			id: 'generate-5min-prompt',
+			name: 'Generate 5-Min Prompt',
+			editorCallback: async (editor: Editor, view: MarkdownView) => {
+				await this.generateReversePrompt(view, editor, 5);
+			}
+		});
+
+		this.addCommand({
+			id: 'generate-10min-prompt',
+			name: 'Generate 10-Min Prompt',
+			editorCallback: async (editor: Editor, view: MarkdownView) => {
+				await this.generateReversePrompt(view, editor, 10);
+			}
+		});
+
+		this.addCommand({
+			id: 'generate-15min-prompt',
+			name: 'Generate 15-Min Prompt',
+			editorCallback: async (editor: Editor, view: MarkdownView) => {
+				await this.generateReversePrompt(view, editor, 15);
+			}
+		});
+
+		this.addCommand({
+			id: 'generate-30min-prompt',
+			name: 'Generate 30-Min Prompt',
+			editorCallback: async (editor: Editor, view: MarkdownView) => {
+				await this.generateReversePrompt(view, editor, 30);
+			}
+		});
+
+		// Extended Writing Session command
+		this.addCommand({
+			id: 'extended-writing-session',
+			name: 'Extended Writing Session',
+			editorCallback: async (editor: Editor, view: MarkdownView) => {
+				new ExtendedSessionModal(this.app, async (duration: number, theme: string) => {
+					await this.generateExtendedSession(view, editor, duration, theme);
+				}).open();
 			}
 		});
 
@@ -904,6 +1612,31 @@ export default class ReversePrompter extends Plugin {
 		// Ensure provider is set
 		if (!this.settings.provider) {
 			this.settings.provider = 'openai';
+		}
+
+		// Migration: Set default maxHistoryPrompts if not present
+		if (this.settings.maxHistoryPrompts === undefined) {
+			this.settings.maxHistoryPrompts = 1000;
+		}
+
+		// Migration: Convert old single prompt to duration-specific prompts
+		if (!this.settings.durationPrompts) {
+			this.settings.durationPrompts = {
+				prompt5: DEFAULT_DURATION_PROMPTS.prompt5,
+				prompt10: DEFAULT_DURATION_PROMPTS.prompt10,
+				prompt15: DEFAULT_DURATION_PROMPTS.prompt15,
+				prompt30: this.settings.prompt || DEFAULT_DURATION_PROMPTS.prompt30,
+				promptExtended: DEFAULT_DURATION_PROMPTS.promptExtended
+			};
+		} else {
+			// Ensure all duration prompts exist, fill missing ones with defaults
+			this.settings.durationPrompts = {
+				prompt5: this.settings.durationPrompts.prompt5 || DEFAULT_DURATION_PROMPTS.prompt5,
+				prompt10: this.settings.durationPrompts.prompt10 || DEFAULT_DURATION_PROMPTS.prompt10,
+				prompt15: this.settings.durationPrompts.prompt15 || DEFAULT_DURATION_PROMPTS.prompt15,
+				prompt30: this.settings.durationPrompts.prompt30 || this.settings.prompt || DEFAULT_DURATION_PROMPTS.prompt30,
+				promptExtended: this.settings.durationPrompts.promptExtended || DEFAULT_DURATION_PROMPTS.promptExtended
+			};
 		}
 	}
 
@@ -1062,15 +1795,15 @@ class ReversePrompterSettingsTab extends PluginSettingTab {
 			this.addSetting(`${this.plugin.settings.provider}ApiKey`)
 				.setName(label)
 				.setDesc(desc)
-				.addText(text => text
+			.addText(text => text
 					.setPlaceholder(placeholder)
 					.setValue(apiKey)
-					.onChange(async (value) => {
+				.onChange(async (value) => {
 						if (!this.plugin.settings.apiKeys) {
 							this.plugin.settings.apiKeys = {};
 						}
 						this.plugin.settings.apiKeys[this.plugin.settings.provider] = value;
-						await this.plugin.saveSettings();
+					await this.plugin.saveSettings();
 						this.onApiKeyChange(value);
 					}));
 		}
@@ -1101,7 +1834,7 @@ class ReversePrompterSettingsTab extends PluginSettingTab {
 				
 				// Set current value
 				if (this.plugin.settings.model && models.includes(this.plugin.settings.model)) {
-					dropdown.setValue(this.plugin.settings.model);
+				dropdown.setValue(this.plugin.settings.model);
 				} else if (models.length > 0) {
 					dropdown.setValue(models[0]);
 					this.plugin.settings.model = models[0];
@@ -1136,9 +1869,9 @@ class ReversePrompterSettingsTab extends PluginSettingTab {
 						}
 						
 						button.setDisabled(false);
-					});
+				});
 			});
-
+		
 		this.addSetting('showAllModels')
 			.setName('Show all models')
 			.setDesc('When unchecked, only the latest 2 models are shown. Check to display all available models from the selected provider.')
@@ -1151,23 +1884,201 @@ class ReversePrompterSettingsTab extends PluginSettingTab {
 					await this.updateModelDropdown();
 				}));
 
-		this.addSetting('prompt')
-			.setName("Prompt")
-			.setDesc("System prompt for generating writing prompts")
-			.addTextArea(textArea => {
-				textArea.inputEl.id = "reverse-prompter-prompt";
-				textArea.setPlaceholder("Enter the prompt")
-				textArea.setValue(this.plugin.settings.prompt)
-				textArea.onChange(async (value) => {
-					this.plugin.settings.prompt = value;
+		// Duration-specific prompts section
+		this.containerEl.createEl('h2', { text: 'Duration-Specific Prompts' });
+		const promptsDesc = this.containerEl.createEl('p', { 
+			text: 'Customize the system prompt for each writing duration. Each prompt guides the AI to generate writing prompts appropriate for that time frame.',
+			attr: { style: 'margin-bottom: 24px; color: var(--text-muted); line-height: 1.6;' }
+		});
+
+		// Helper function to create a duration prompt setting with collapsible UI
+		const createDurationPromptSetting = (
+			duration: string,
+			durationKey: 'prompt5' | 'prompt10' | 'prompt15' | 'prompt30' | 'promptExtended',
+			description: string,
+			rows: number = 6,
+			titleSuffix: string = ' Minutes Prompt'
+		) => {
+			// Create a container with better spacing
+			const sectionContainer = this.containerEl.createDiv({ 
+				attr: { 
+					style: 'margin-bottom: 24px; padding: 16px; background: var(--background-secondary); border-radius: 6px; border: 1px solid var(--background-modifier-border);' 
+				} 
+			});
+
+			// Title and description
+			const titleText = durationKey === 'promptExtended' ? 'Extended Session Prompt (45+ minutes)' : `${duration}${titleSuffix}`;
+			const titleEl = sectionContainer.createEl('h3', { 
+				text: titleText,
+				attr: { style: 'margin-top: 0; margin-bottom: 8px; font-size: 1.1em; font-weight: 600;' }
+			});
+			
+			const descEl = sectionContainer.createEl('p', {
+				text: description,
+				attr: { style: 'margin-top: 0; margin-bottom: 16px; color: var(--text-muted); font-size: 0.9em; line-height: 1.5;' }
+			});
+
+			// Create setting container
+			const settingContainer = sectionContainer.createDiv({ attr: { style: 'margin-bottom: 12px;' } });
+			
+			// Text area
+			const textAreaContainer = settingContainer.createDiv();
+			const textArea = textAreaContainer.createEl('textarea', {
+				attr: {
+					class: 'reverse-prompter-prompt-textarea',
+					style: 'width: 100%; min-height: 120px; padding: 12px; font-family: var(--font-monospace); font-size: 0.9em; background: var(--background-primary); border: 1px solid var(--background-modifier-border); border-radius: 4px; resize: vertical;',
+					rows: rows.toString()
+				}
+			}) as HTMLTextAreaElement;
+
+			// Get current value (ensure durationPrompts exists)
+			if (!this.plugin.settings.durationPrompts) {
+				this.plugin.settings.durationPrompts = {
+					prompt5: DEFAULT_DURATION_PROMPTS.prompt5,
+					prompt10: DEFAULT_DURATION_PROMPTS.prompt10,
+					prompt15: DEFAULT_DURATION_PROMPTS.prompt15,
+					prompt30: DEFAULT_DURATION_PROMPTS.prompt30,
+					promptExtended: DEFAULT_DURATION_PROMPTS.promptExtended
+				};
+			}
+
+			const currentValue = this.plugin.settings.durationPrompts[durationKey] || DEFAULT_DURATION_PROMPTS[durationKey];
+			textArea.value = currentValue;
+			const placeholderText = durationKey === 'promptExtended' 
+				? 'Enter the extended session prompt (45+ minutes)...'
+				: `Enter the ${duration}-minute prompt...`;
+			textArea.placeholder = placeholderText;
+
+			// Update on change
+			textArea.addEventListener('input', async (e) => {
+				const value = (e.target as HTMLTextAreaElement).value;
+				if (!this.plugin.settings.durationPrompts) {
+					this.plugin.settings.durationPrompts = {
+						prompt5: DEFAULT_DURATION_PROMPTS.prompt5,
+						prompt10: DEFAULT_DURATION_PROMPTS.prompt10,
+						prompt15: DEFAULT_DURATION_PROMPTS.prompt15,
+						prompt30: DEFAULT_DURATION_PROMPTS.prompt30,
+						promptExtended: DEFAULT_DURATION_PROMPTS.promptExtended
+					};
+				}
+				this.plugin.settings.durationPrompts[durationKey] = value;
 					await this.plugin.saveSettings();
-				})
-				textArea.inputEl.rows = 10;
-			})
-			.addButton(button => {
-				this.configureResetButton(button, 'prompt', () => {
-					new Notice("Prompt reset to default");
-				});
+			});
+
+			// Reset button container
+			const buttonContainer = settingContainer.createDiv({ 
+				attr: { style: 'margin-top: 12px; display: flex; justify-content: flex-end;' } 
+			});
+			const resetButton = buttonContainer.createEl('button', {
+				text: 'Reset to Default',
+				attr: {
+					class: 'mod-cta',
+					style: 'padding: 6px 14px; font-size: 0.9em;'
+				}
+			});
+
+			resetButton.addEventListener('click', async () => {
+				if (!this.plugin.settings.durationPrompts) {
+					this.plugin.settings.durationPrompts = {
+						prompt5: DEFAULT_DURATION_PROMPTS.prompt5,
+						prompt10: DEFAULT_DURATION_PROMPTS.prompt10,
+						prompt15: DEFAULT_DURATION_PROMPTS.prompt15,
+						prompt30: DEFAULT_DURATION_PROMPTS.prompt30,
+						promptExtended: DEFAULT_DURATION_PROMPTS.promptExtended
+					};
+				}
+				this.plugin.settings.durationPrompts[durationKey] = DEFAULT_DURATION_PROMPTS[durationKey];
+				textArea.value = DEFAULT_DURATION_PROMPTS[durationKey];
+					await this.plugin.saveSettings();
+				const noticeText = durationKey === 'promptExtended' 
+					? 'Extended session prompt reset to default'
+					: `${duration}-minute prompt reset to default`;
+				new Notice(noticeText);
+			});
+		};
+
+		// Create all duration prompt settings
+		createDurationPromptSetting(
+			'5',
+			'prompt5',
+			'Simple, single-concept prompts that are graspable in less than 30 seconds. Focus on quick reflection and immediate action.',
+			6
+		);
+
+		createDurationPromptSetting(
+			'10',
+			'prompt10',
+			'Slightly deeper exploration while remaining accessible. Allow for more nuanced scenarios within the time limit.',
+			6
+		);
+
+		createDurationPromptSetting(
+			'15',
+			'prompt15',
+			'Nuanced scenarios with multiple layers. Deeper emotional introspection and exploration of concepts with greater complexity.',
+			6
+		);
+
+		createDurationPromptSetting(
+			'30',
+			'prompt30',
+			'Complex scenarios with depth, philosophical questions, and detailed exploration. Full creative freedom for deep writing sessions.',
+			6
+		);
+
+		// Extended session prompt (45+ minutes)
+		createDurationPromptSetting(
+			'Extended',
+			'promptExtended',
+			'For extended writing sessions (45 minutes and longer). Designed for multi-part narrative prompts with exceptional depth, profound themes, and complex exploration. Full creative freedom for extended creative work.',
+			6,
+			' Session Prompt (45+ minutes)'
+		);
+
+		// Prompt History Limit setting
+		this.addSetting('maxHistoryPrompts')
+			.setName("Prompt History Limit")
+			.setDesc("Maximum number of single prompts to keep in history (default: 1000). Higher values may increase plugin load time.")
+			.addText(text => {
+				text.setPlaceholder("1000")
+					.setValue(this.plugin.settings.maxHistoryPrompts?.toString() || "1000")
+					.onChange(async (value) => {
+						const numValue = parseInt(value);
+						if (isNaN(numValue) || numValue < 1) {
+							new Notice("Please enter a valid number greater than 0.");
+							return;
+						}
+
+						// Warning for large values
+						if (numValue > 5000) {
+							const confirmed = confirm(
+								`Warning: Setting history limit to ${numValue} prompts may:\n\n` +
+								`- Increase plugin load time (${Math.round(numValue * 0.5 / 1000)}-${Math.round(numValue * 1.3 / 1000)}MB data)\n` +
+								`- Slow down theme processing\n` +
+								`- Use more disk space\n\n` +
+								`Are you sure you want to continue?`
+							);
+							if (!confirmed) {
+								text.setValue(this.plugin.settings.maxHistoryPrompts?.toString() || "1000");
+								return;
+							}
+						}
+
+						this.plugin.settings.maxHistoryPrompts = numValue;
+						
+						// Enforce new limit immediately
+						this.plugin.enforceHistoryLimit();
+						
+						await this.plugin.saveSettings();
+						
+						if (numValue > 5000) {
+							new Notice(`History limit set to ${numValue}. Plugin performance may be affected.`);
+						} else {
+							new Notice(`History limit updated to ${numValue}.`);
+						}
+					});
+				text.inputEl.type = "number";
+				text.inputEl.min = "1";
 			});
 		
 	}
