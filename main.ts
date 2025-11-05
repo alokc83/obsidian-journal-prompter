@@ -670,17 +670,52 @@ interface ReversePrompterSettings {
 		ollama?: string; // URL for Ollama (e.g., http://localhost:11434)
 		lmstudio?: string; // URL for LM Studio (e.g., http://localhost:1234)
 	};
-	prompt: string;
+	prompt: string; // Legacy field for backward compatibility (maps to prompt30)
+	durationPrompts: {
+		prompt5: string;
+		prompt10: string;
+		prompt15: string;
+		prompt30: string;
+		promptExtended: string; // For extended sessions (45+ minutes)
+	};
 	model: string; // User's selected model (only stored when user saves/selects)
 	showAllModels: boolean; // Whether to show all models or just latest 2
 	promptHistory?: PromptHistory; // Prompt history for theme interlinking (MVP: single prompts only)
 	maxHistoryPrompts: number; // Maximum number of single prompts to keep in history (default: 1000)
 }
 
-const DEFAULT_PROMPT = "You are an expert prompt generator specializing in short writing exercises, particularly 5-minute journaling sessions. Your primary role is to craft compelling, thought-provoking prompts that inspire users to write with depth and creativity. \n\n" +
-"Your prompts should be designed to invoke profound thoughtfulness, deep emotional introspection, challenging philosophical questioning, complex moral ambiguity, and unexpected perspectives. Create prompts that feature unique settings, surprising character flaws, hidden motives, intriguing contradictions, or paradoxical situations that push writers far beyond their comfort zones and encourage them to explore unexpected depths in any subject matter. \n\n" +
-"Feel free to blend wildly different genres, juxtapose contrasting time periods, merge conflicting worldviews, introduce open-ended mysteries, or pose philosophical questions that challenge conventional thinking. Your prompts should be catalysts for creative exploration and personal growth through writing. \n\n" +
-"CRITICAL: You must always and always provide exactly one single, well-crafted prompt. Do not provide multiple options, explanations, or variations. Give one powerful, focused prompt that will ignite the writer's imagination and drive them to create something meaningful. "
+// Default prompts for each duration - inspired by the expert prompt generator style
+// These are used as defaults and can be customized in settings
+const DEFAULT_DURATION_PROMPTS = {
+	prompt5: "You are an expert prompt generator, your primary role is to craft compelling, thought-provoking prompts that inspire users to write with depth and creativity.\n\n" +
+		"For 5-minute writing sessions, your prompts should be simple and straightforward, graspable in less than 30 seconds. Focus on a single concept, idea, or scenario that gets the writer started immediately. Keep prompts light and accessible, designed for quick reflection without requiring deep contemplation. Your prompts should still invoke thoughtfulness and emotional connection, but in a way that's immediately understandable and actionable.\n\n" +
+		"Create prompts with unique settings, surprising perspectives, or intriguing questions that push writers to explore unexpected depths, but do so in a way that's not dense or complex. The prompts should be catalysts for quick creative exploration and personal reflection.\n\n" +
+		"CRITICAL: You must always and always provide exactly one single, well-crafted prompt. Do not provide multiple options, explanations, or variations. Give one powerful, focused prompt that will ignite the writer's imagination and drive them to create something meaningful.",
+	
+	prompt10: "You are an expert prompt generator, your primary role is to craft compelling, thought-provoking prompts that inspire users to write with depth and creativity.\n\n" +
+		"For 10-minute writing sessions, your prompts should allow for slightly deeper exploration while remaining accessible. Present scenarios or questions with some nuance, but not overwhelming complexity. Your prompts should invoke thoughtful reflection, emotional introspection, and allow writers to explore a concept or scenario with more depth than a 5-minute prompt.\n\n" +
+		"Create prompts that feature unique settings, surprising character dynamics, or intriguing contradictions that push writers to explore unexpected angles. Feel free to introduce subtle mysteries or pose questions that challenge conventional thinking, but keep them manageable within the 10-minute time limit.\n\n" +
+		"CRITICAL: You must always and always provide exactly one single, well-crafted prompt. Do not provide multiple options, explanations, or variations. Give one powerful, focused prompt that will ignite the writer's imagination and drive them to create something meaningful.",
+	
+	prompt15: "You are an expert prompt generator, your primary role is to craft compelling, thought-provoking prompts that inspire users to write with depth and creativity.\n\n" +
+		"For 15-minute writing sessions, your prompts should include nuanced scenarios with multiple layers. Your prompts should be designed to invoke deeper emotional introspection, explore concepts with greater complexity, and present scenarios with subtle contradictions or interesting dynamics. Allow writers to explore multiple facets of an idea or situation while still being manageable within the time limit.\n\n" +
+		"Create prompts that feature unique settings, surprising character flaws, hidden motives, or intriguing contradictions that push writers to explore unexpected depths. Feel free to blend different perspectives, introduce open-ended scenarios, or pose questions that challenge conventional thinking. Your prompts should be catalysts for deeper creative exploration and personal growth through writing.\n\n" +
+		"CRITICAL: You must always and always provide exactly one single, well-crafted prompt. Do not provide multiple options, explanations, or variations. Give one powerful, focused prompt that will ignite the writer's imagination and drive them to create something meaningful.",
+	
+	prompt30: "You are an expert prompt generator, your primary role is to craft compelling, thought-provoking prompts that inspire users to write with depth and creativity.\n\n" +
+		"Your prompts should be designed to invoke profound thoughtfulness, deep emotional introspection, challenging philosophical questioning, complex moral ambiguity, and unexpected perspectives. Create prompts that feature unique settings, surprising character flaws, hidden motives, intriguing contradictions, or paradoxical situations that push writers far beyond their comfort zones and encourage them to explore unexpected depths in any subject matter.\n\n" +
+		"Feel free to blend wildly different genres, juxtapose contrasting time periods, merge conflicting worldviews, introduce open-ended mysteries, or pose philosophical questions that challenge conventional thinking. Your prompts should be catalysts for creative exploration and personal growth through writing.\n\n" +
+		"CRITICAL: You must always and always provide exactly one single, well-crafted prompt. Do not provide multiple options, explanations, or variations. Give one powerful, focused prompt that will ignite the writer's imagination and drive them to create something meaningful.",
+	
+	promptExtended: "You are an expert prompt generator specializing in extended journaling sessions (45 minutes and longer). Your primary role is to craft compelling, thought-provoking prompts that inspire users to write with exceptional depth and creativity.\n\n" +
+		"Your prompts must be designed to invoke profound thoughtfulness, deep emotional introspection, challenging philosophical questioning, complex moral ambiguity, and unexpected perspectives. Create prompts that feature unique settings, surprising character flaws, hidden motives, intriguing contradictions, or paradoxical situations that push writers far beyond their comfort zones and encourage them to explore unexpected depths in any subject matter.\n\n" +
+		"You have full creative freedom to blend wildly different genres, juxtapose contrasting time periods, merge conflicting worldviews, introduce open-ended mysteries, or pose philosophical questions that challenge conventional thinking. Your prompts should be catalysts for deep creative exploration and significant personal growth through extended writing.\n\n" +
+		"If the user provides a theme, topic, or document context, use this information to tailor your prompt accordingly. However, do not limit yourself to obvious connections - sometimes the most powerful prompts come from unexpected angles that create surprising bridges between ideas.\n\n" +
+		"CRITICAL OUTPUT REQUIREMENT: You must always provide exactly one single, well-crafted prompt. Do not provide multiple options, explanations, variations, or additional commentary. Give one powerful, focused prompt that will ignite the writer's imagination and drive them to create something meaningful during their extended writing session."
+};
+
+// Legacy default prompt (for backward compatibility)
+const DEFAULT_PROMPT = DEFAULT_DURATION_PROMPTS.prompt30;
 
 const DEFAULT_SETTINGS: ReversePrompterSettings = {
 	provider: 'openai',
@@ -692,7 +727,14 @@ const DEFAULT_SETTINGS: ReversePrompterSettings = {
 		ollama: 'http://localhost:11434',
 		lmstudio: 'http://localhost:1234'
 	},
-	prompt: DEFAULT_PROMPT,
+	prompt: DEFAULT_PROMPT, // Legacy field for backward compatibility
+	durationPrompts: {
+		prompt5: DEFAULT_DURATION_PROMPTS.prompt5,
+		prompt10: DEFAULT_DURATION_PROMPTS.prompt10,
+		prompt15: DEFAULT_DURATION_PROMPTS.prompt15,
+		prompt30: DEFAULT_DURATION_PROMPTS.prompt30,
+		promptExtended: DEFAULT_DURATION_PROMPTS.promptExtended
+	},
 	model: '', // No default model - will be set when user selects one
 	showAllModels: false, // Default to showing only latest 2 models
 	promptHistory: {
@@ -1042,40 +1084,27 @@ export default class ReversePrompter extends Plugin {
 			duration = 5;
 		}
 
-		let durationGuidance = '';
-		
+		// Use duration-specific prompt from settings
+		let durationPrompt: string;
 		switch (duration) {
 			case 5:
-				durationGuidance = "\n\nDURATION GUIDANCE: This prompt is for a 5-minute writing session. The prompt must be:\n" +
-					"- Simple and straightforward, graspable in less than 30 seconds\n" +
-					"- Focused on a single concept, idea, or scenario\n" +
-					"- Not dense or complex - keep it light and accessible\n" +
-					"- Designed to inspire quick reflection without requiring deep contemplation\n";
+				durationPrompt = this.settings.durationPrompts?.prompt5 || DEFAULT_DURATION_PROMPTS.prompt5;
 				break;
 			case 10:
-				durationGuidance = "\n\nDURATION GUIDANCE: This prompt is for a 10-minute writing session. The prompt should:\n" +
-					"- Have slightly more depth than a 5-minute prompt\n" +
-					"- Allow for a bit more exploration of a concept\n" +
-					"- Remain accessible and not overwhelming\n" +
-					"- Encourage thoughtful reflection within the time limit\n";
+				durationPrompt = this.settings.durationPrompts?.prompt10 || DEFAULT_DURATION_PROMPTS.prompt10;
 				break;
 			case 15:
-				durationGuidance = "\n\nDURATION GUIDANCE: This prompt is for a 15-minute writing session. The prompt can:\n" +
-					"- Include more nuanced scenarios with multiple layers\n" +
-					"- Explore concepts with greater complexity\n" +
-					"- Still be manageable within the time limit\n" +
-					"- Invite deeper introspection and exploration\n";
+				durationPrompt = this.settings.durationPrompts?.prompt15 || DEFAULT_DURATION_PROMPTS.prompt15;
 				break;
 			case 30:
-				durationGuidance = "\n\nDURATION GUIDANCE: This prompt is for a 30-minute writing session. The prompt can:\n" +
-					"- Include detailed and complex scenarios\n" +
-					"- Explore multiple facets of an idea or situation\n" +
-					"- Support deeper, more elaborate writing\n" +
-					"- Allow for rich development and exploration\n";
+				durationPrompt = this.settings.durationPrompts?.prompt30 || DEFAULT_DURATION_PROMPTS.prompt30;
 				break;
+			default:
+				durationPrompt = this.settings.durationPrompts?.prompt5 || DEFAULT_DURATION_PROMPTS.prompt5;
 		}
-
-		return basePrompt + durationGuidance;
+		
+		// The basePrompt parameter is kept for backward compatibility and extended sessions
+		return durationPrompt;
 	}
 
 	// Calculate number of parts for extended session (each part ~10 minutes)
@@ -1221,24 +1250,31 @@ export default class ReversePrompter extends Plugin {
 	}
 
 	// Build system prompt for extended sessions
+	// Extended sessions use the extended session prompt as foundation, enhanced with multi-part narrative guidance
 	buildExtendedSessionPrompt(basePrompt: string, duration: number, numParts: number, theme?: string): string {
+		// Use extended session prompt from settings (designed for 45+ minute sessions)
+		const extendedBasePrompt = this.settings.durationPrompts?.promptExtended || DEFAULT_DURATION_PROMPTS.promptExtended;
+		
 		let extendedGuidance = `\n\nEXTENDED SESSION GUIDANCE:\n`;
 		extendedGuidance += `You are generating prompts for an extended writing session of ${duration} minutes, divided into ${numParts} sequential parts.\n\n`;
-		extendedGuidance += `IMPORTANT RULES:\n`;
+		extendedGuidance += `IMPORTANT RULES FOR MULTI-PART NARRATIVE PROMPTS:\n`;
 		extendedGuidance += `- Each part is designed for approximately 10 minutes of writing\n`;
-		extendedGuidance += `- Parts must be sequential and build a coherent narrative\n`;
-		extendedGuidance += `- Each part should advance the story/scenario naturally\n`;
-		extendedGuidance += `- Maintain continuity between parts\n`;
-		extendedGuidance += `- Create a unified story arc across all parts\n`;
+		extendedGuidance += `- Parts must be sequential and build a coherent narrative arc\n`;
+		extendedGuidance += `- Each part should advance the story/scenario naturally from the previous part\n`;
+		extendedGuidance += `- Maintain continuity between parts - reference previous events, characters, or themes\n`;
+		extendedGuidance += `- Create a unified story arc across all parts with natural progression\n`;
+		extendedGuidance += `- Build tension, depth, and complexity as the narrative progresses\n`;
 		if (theme) {
 			extendedGuidance += `- Theme/Genre: ${theme}\n`;
 		}
-		extendedGuidance += `- For each part, first provide rich narrative context that sets the scene or continues the story\n`;
-		extendedGuidance += `- Then provide the writing prompt labeled as "Prompt (Part X):" followed by the actual prompt text\n`;
-		extendedGuidance += `- Format: [narrative context paragraph(s)] followed by blank line, then "Prompt (Part X):" on new line, then the prompt\n`;
-		extendedGuidance += `- Each prompt should inspire 10 minutes of writing\n`;
+		extendedGuidance += `\nOUTPUT FORMAT FOR EACH PART:\n`;
+		extendedGuidance += `- First, provide rich narrative context (in italics) that sets the scene or continues the story from the previous part\n`;
+		extendedGuidance += `- Then, on a new line, provide the writing prompt labeled as "Prompt (Part X):" followed by the actual prompt text (also in italics)\n`;
+		extendedGuidance += `- The narrative context should bridge from previous parts and set up the current prompt\n`;
+		extendedGuidance += `- Each prompt should inspire approximately 10 minutes of focused writing\n`;
+		extendedGuidance += `- Make the narrative context engaging and immersive, drawing the writer into the evolving story\n`;
 
-		return basePrompt + extendedGuidance;
+		return extendedBasePrompt + extendedGuidance;
 	}
 
 	// Get part title based on part number and total parts
@@ -1545,6 +1581,26 @@ export default class ReversePrompter extends Plugin {
 		if (this.settings.maxHistoryPrompts === undefined) {
 			this.settings.maxHistoryPrompts = 1000;
 		}
+
+		// Migration: Convert old single prompt to duration-specific prompts
+		if (!this.settings.durationPrompts) {
+			this.settings.durationPrompts = {
+				prompt5: DEFAULT_DURATION_PROMPTS.prompt5,
+				prompt10: DEFAULT_DURATION_PROMPTS.prompt10,
+				prompt15: DEFAULT_DURATION_PROMPTS.prompt15,
+				prompt30: this.settings.prompt || DEFAULT_DURATION_PROMPTS.prompt30,
+				promptExtended: DEFAULT_DURATION_PROMPTS.promptExtended
+			};
+		} else {
+			// Ensure all duration prompts exist, fill missing ones with defaults
+			this.settings.durationPrompts = {
+				prompt5: this.settings.durationPrompts.prompt5 || DEFAULT_DURATION_PROMPTS.prompt5,
+				prompt10: this.settings.durationPrompts.prompt10 || DEFAULT_DURATION_PROMPTS.prompt10,
+				prompt15: this.settings.durationPrompts.prompt15 || DEFAULT_DURATION_PROMPTS.prompt15,
+				prompt30: this.settings.durationPrompts.prompt30 || this.settings.prompt || DEFAULT_DURATION_PROMPTS.prompt30,
+				promptExtended: this.settings.durationPrompts.promptExtended || DEFAULT_DURATION_PROMPTS.promptExtended
+			};
+		}
 	}
 
 	async saveSettings() {
@@ -1778,7 +1834,7 @@ class ReversePrompterSettingsTab extends PluginSettingTab {
 						button.setDisabled(false);
 				});
 			});
-
+		
 		this.addSetting('showAllModels')
 			.setName('Show all models')
 			.setDesc('When unchecked, only the latest 2 models are shown. Check to display all available models from the selected provider.')
@@ -1791,24 +1847,156 @@ class ReversePrompterSettingsTab extends PluginSettingTab {
 					await this.updateModelDropdown();
 				}));
 
-		this.addSetting('prompt')
-			.setName("Prompt")
-			.setDesc("System prompt for generating writing prompts")
-			.addTextArea(textArea => {
-				textArea.inputEl.id = "reverse-prompter-prompt";
-				textArea.setPlaceholder("Enter the prompt")
-				textArea.setValue(this.plugin.settings.prompt)
-				textArea.onChange(async (value) => {
-					this.plugin.settings.prompt = value;
-					await this.plugin.saveSettings();
-				})
-				textArea.inputEl.rows = 10;
-			})
-			.addButton(button => {
-				this.configureResetButton(button, 'prompt', () => {
-					new Notice("Prompt reset to default");
-				});
+		// Duration-specific prompts section
+		this.containerEl.createEl('h2', { text: 'Duration-Specific Prompts' });
+		const promptsDesc = this.containerEl.createEl('p', { 
+			text: 'Customize the system prompt for each writing duration. Each prompt guides the AI to generate writing prompts appropriate for that time frame.',
+			attr: { style: 'margin-bottom: 24px; color: var(--text-muted); line-height: 1.6;' }
+		});
+
+		// Helper function to create a duration prompt setting with collapsible UI
+		const createDurationPromptSetting = (
+			duration: string,
+			durationKey: 'prompt5' | 'prompt10' | 'prompt15' | 'prompt30' | 'promptExtended',
+			description: string,
+			rows: number = 6,
+			titleSuffix: string = ' Minutes Prompt'
+		) => {
+			// Create a container with better spacing
+			const sectionContainer = this.containerEl.createDiv({ 
+				attr: { 
+					style: 'margin-bottom: 24px; padding: 16px; background: var(--background-secondary); border-radius: 6px; border: 1px solid var(--background-modifier-border);' 
+				} 
 			});
+
+			// Title and description
+			const titleText = durationKey === 'promptExtended' ? 'Extended Session Prompt (45+ minutes)' : `${duration}${titleSuffix}`;
+			const titleEl = sectionContainer.createEl('h3', { 
+				text: titleText,
+				attr: { style: 'margin-top: 0; margin-bottom: 8px; font-size: 1.1em; font-weight: 600;' }
+			});
+			
+			const descEl = sectionContainer.createEl('p', {
+				text: description,
+				attr: { style: 'margin-top: 0; margin-bottom: 16px; color: var(--text-muted); font-size: 0.9em; line-height: 1.5;' }
+			});
+
+			// Create setting container
+			const settingContainer = sectionContainer.createDiv({ attr: { style: 'margin-bottom: 12px;' } });
+			
+			// Text area
+			const textAreaContainer = settingContainer.createDiv();
+			const textArea = textAreaContainer.createEl('textarea', {
+				attr: {
+					class: 'reverse-prompter-prompt-textarea',
+					style: 'width: 100%; min-height: 120px; padding: 12px; font-family: var(--font-monospace); font-size: 0.9em; background: var(--background-primary); border: 1px solid var(--background-modifier-border); border-radius: 4px; resize: vertical;',
+					rows: rows.toString()
+				}
+			}) as HTMLTextAreaElement;
+
+			// Get current value (ensure durationPrompts exists)
+			if (!this.plugin.settings.durationPrompts) {
+				this.plugin.settings.durationPrompts = {
+					prompt5: DEFAULT_DURATION_PROMPTS.prompt5,
+					prompt10: DEFAULT_DURATION_PROMPTS.prompt10,
+					prompt15: DEFAULT_DURATION_PROMPTS.prompt15,
+					prompt30: DEFAULT_DURATION_PROMPTS.prompt30,
+					promptExtended: DEFAULT_DURATION_PROMPTS.promptExtended
+				};
+			}
+
+			const currentValue = this.plugin.settings.durationPrompts[durationKey] || DEFAULT_DURATION_PROMPTS[durationKey];
+			textArea.value = currentValue;
+			const placeholderText = durationKey === 'promptExtended' 
+				? 'Enter the extended session prompt (45+ minutes)...'
+				: `Enter the ${duration}-minute prompt...`;
+			textArea.placeholder = placeholderText;
+
+			// Update on change
+			textArea.addEventListener('input', async (e) => {
+				const value = (e.target as HTMLTextAreaElement).value;
+				if (!this.plugin.settings.durationPrompts) {
+					this.plugin.settings.durationPrompts = {
+						prompt5: DEFAULT_DURATION_PROMPTS.prompt5,
+						prompt10: DEFAULT_DURATION_PROMPTS.prompt10,
+						prompt15: DEFAULT_DURATION_PROMPTS.prompt15,
+						prompt30: DEFAULT_DURATION_PROMPTS.prompt30,
+						promptExtended: DEFAULT_DURATION_PROMPTS.promptExtended
+					};
+				}
+				this.plugin.settings.durationPrompts[durationKey] = value;
+					await this.plugin.saveSettings();
+			});
+
+			// Reset button container
+			const buttonContainer = settingContainer.createDiv({ 
+				attr: { style: 'margin-top: 12px; display: flex; justify-content: flex-end;' } 
+			});
+			const resetButton = buttonContainer.createEl('button', {
+				text: 'Reset to Default',
+				attr: {
+					class: 'mod-cta',
+					style: 'padding: 6px 14px; font-size: 0.9em;'
+				}
+			});
+
+			resetButton.addEventListener('click', async () => {
+				if (!this.plugin.settings.durationPrompts) {
+					this.plugin.settings.durationPrompts = {
+						prompt5: DEFAULT_DURATION_PROMPTS.prompt5,
+						prompt10: DEFAULT_DURATION_PROMPTS.prompt10,
+						prompt15: DEFAULT_DURATION_PROMPTS.prompt15,
+						prompt30: DEFAULT_DURATION_PROMPTS.prompt30,
+						promptExtended: DEFAULT_DURATION_PROMPTS.promptExtended
+					};
+				}
+				this.plugin.settings.durationPrompts[durationKey] = DEFAULT_DURATION_PROMPTS[durationKey];
+				textArea.value = DEFAULT_DURATION_PROMPTS[durationKey];
+					await this.plugin.saveSettings();
+				const noticeText = durationKey === 'promptExtended' 
+					? 'Extended session prompt reset to default'
+					: `${duration}-minute prompt reset to default`;
+				new Notice(noticeText);
+			});
+		};
+
+		// Create all duration prompt settings
+		createDurationPromptSetting(
+			'5',
+			'prompt5',
+			'Simple, single-concept prompts that are graspable in less than 30 seconds. Focus on quick reflection and immediate action.',
+			6
+		);
+
+		createDurationPromptSetting(
+			'10',
+			'prompt10',
+			'Slightly deeper exploration while remaining accessible. Allow for more nuanced scenarios within the time limit.',
+			6
+		);
+
+		createDurationPromptSetting(
+			'15',
+			'prompt15',
+			'Nuanced scenarios with multiple layers. Deeper emotional introspection and exploration of concepts with greater complexity.',
+			6
+		);
+
+		createDurationPromptSetting(
+			'30',
+			'prompt30',
+			'Complex scenarios with depth, philosophical questions, and detailed exploration. Full creative freedom for deep writing sessions.',
+			6
+		);
+
+		// Extended session prompt (45+ minutes)
+		createDurationPromptSetting(
+			'Extended',
+			'promptExtended',
+			'For extended writing sessions (45 minutes and longer). Designed for multi-part narrative prompts with exceptional depth, profound themes, and complex exploration. Full creative freedom for extended creative work.',
+			6,
+			' Session Prompt (45+ minutes)'
+		);
 
 		// Prompt History Limit setting
 		this.addSetting('maxHistoryPrompts')
